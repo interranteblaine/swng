@@ -5,17 +5,25 @@ import type { ClientStore, FetchCimdDeps } from "./clients.js";
 import { redirectUriAllowed, resolveClient } from "./clients.js";
 
 // /authorize, the Cognito callback, and consent (design spec §4.2/§4.3, Task 17). swng
-// MEDIATES; Cognito remains the only token issuer. ORDER IS LOAD-BEARING:
+// MEDIATES; Cognito remains the only token issuer.
 //
-//   1. handleAuthorize   — validate the client's request, store it, 302 to Cognito.
-//   2. handleCallback    — exchange Cognito's code IMMEDIATELY (5-minute expiry), hold the
-//                           tokens under a short TTL, render consent. No code exists yet.
-//   3. handleConsentSubmit — on approve, mint an opaque code bound to the held tokens and ONLY
-//                           the scopes the golfer actually approved. On deny, no code, ever.
+// TWO COGNITO LEGS, not one — fix round 1's Critical 1/2. Leg 1 (handleAuthorize ->
+// handleCallback/finishLeg1) NEVER requests more than read from Cognito, no matter what the
+// client asked for — so the tokens held while consent renders can never carry write. The
+// consent page (renderConsentPage) UNCONDITIONALLY offers "read-only" or "read and write" —
+// never gated on what the client requested, which was Critical 2's defect (spec §4.4 exists
+// precisely so the GOLFER'S choice decides, not the client's ask). Only when the golfer picks
+// "read and write" does a SECOND, silent leg run (beginWriteStepUp -> handleCallback/
+// finishLeg2): a fresh Cognito authorize round trip requesting read+write, silent because the
+// golfer already has an active Cognito session from leg 1. The client's own opaque code is
+// minted exactly once — in finishLeg2's write-approved branch, or directly in
+// handleConsentSubmit's read-only branch — and in both cases it's bound to a Cognito token that
+// was ACTUALLY ISSUED for the scopes being approved, never a token issued for more.
 //
-// Minting the client's code before consent would mean a code exists for a grant nobody
-// approved — so nothing in this file constructs a `putCode` call anywhere except inside
-// handleConsentSubmit's approve branch.
+// ORDER IS STILL LOAD-BEARING: nothing constructs a `putCode` call anywhere except inside
+// handleConsentSubmit's read-only branch and finishLeg2's write branch — both of which run only
+// after the golfer approved. Minting before consent would mean a code exists for a grant nobody
+// approved.
 
 // ---------------------------------------------------------------------------------------------
 // Scopes — one constant, three roles (design spec §4.3): `resource` IS the MCP endpoint URL,
@@ -27,12 +35,11 @@ const readScopeOf = (resource: string): string => `${resource}/read`;
 const writeScopeOf = (resource: string): string => `${resource}/write`;
 
 // ---------------------------------------------------------------------------------------------
-// Stored record shapes. Both live in Task 14's `request` slot (10 min, single-use) — this file
-// never gets a dedicated "held tokens" slot, and doesn't need one: `handleCallback` calls
-// `takeRequest` on the "pending" record `handleAuthorize` wrote, then `putRequest` again under a
-// FRESH id with `phase: "consent"` added and the Cognito tokens attached. `handleConsentSubmit`
-// then `takeRequest`s THAT. Two phases, one slot, single-use both times — a replayed callback or
-// a replayed consent submission each redeem nothing the second time.
+// Stored record shapes — three phases, all in Task 14's `request` slot (10 min, single-use).
+// "pending" (leg 1 sent, awaiting Cognito) -> "consent" (leg 1 tokens held, awaiting the
+// golfer) -> EITHER a code is minted directly (read-only) OR "leg2-pending" (write step-up sent,
+// awaiting Cognito again) -> a code is minted from leg 2's tokens. Every phase is consumed by
+// exactly one `takeRequest`, so a replay at any step redeems nothing.
 // ---------------------------------------------------------------------------------------------
 
 interface PendingAuthorizeRequest {
@@ -41,11 +48,14 @@ interface PendingAuthorizeRequest {
   readonly clientName?: string;
   readonly redirectUri: string; // canonical — the value redirectUriAllowed RETURNED, never the raw input
   readonly clientState?: string;
+  // The CLIENT's ask, F5-validated and kept for record/audit. Does NOT bound what the golfer can
+  // approve at consent (fix round 1, Critical 2) — the consent page offers both scopes
+  // unconditionally, regardless of what's requested here.
   readonly requestedScopes: readonly string[];
   readonly codeChallenge: string;
   readonly codeChallengeMethod: string;
   readonly registeredRedirectUris: readonly string[]; // for the consent page's loopback-only warning
-  readonly cognitoCodeVerifier: string; // OUR PKCE verifier for the Cognito leg, generated in step 1
+  readonly cognitoCodeVerifier: string; // OUR PKCE verifier for the Cognito leg-1 hop
 }
 
 interface ConsentAuthorizeRequest {
@@ -58,11 +68,25 @@ interface ConsentAuthorizeRequest {
   readonly codeChallenge: string;
   readonly codeChallengeMethod: string;
   readonly registeredRedirectUris: readonly string[];
+  // Leg-1 tokens — READ-ONLY, always (fix round 1, Critical 1): handleAuthorize caps the
+  // leg-1 Cognito request at readScopeOf(resource) unconditionally, so these can never carry
+  // write no matter what requestedScopes says.
   readonly cognitoAccessToken: string;
   readonly cognitoRefreshToken?: string;
 }
 
-export type AuthorizeRequestRecord = PendingAuthorizeRequest | ConsentAuthorizeRequest;
+interface Leg2PendingAuthorizeRequest {
+  readonly phase: "leg2-pending";
+  readonly clientId: string;
+  readonly redirectUri: string;
+  readonly clientState?: string;
+  readonly codeChallenge: string;
+  readonly codeChallengeMethod: string;
+  readonly approvedScopes: readonly string[]; // fixed to [read, write] by the only path that reaches this phase
+  readonly cognitoCodeVerifier: string; // fresh PKCE for the silent leg-2 hop
+}
+
+export type AuthorizeRequestRecord = PendingAuthorizeRequest | ConsentAuthorizeRequest | Leg2PendingAuthorizeRequest;
 
 export interface AuthorizeCodeGrant {
   readonly clientId: string;
@@ -108,13 +132,14 @@ export interface AuthorizeDeps {
   readonly store: AuthorizeStore;
   readonly cognito: AuthorizeCognitoConfig;
   readonly fetchImpl?: typeof fetch; // injected so pnpm validate stays offline
-  readonly generateId?: () => string; // requestId / consentId / code — default randomUUID
+  readonly generateId?: () => string; // requestId / consentId / leg2Id / code — default randomUUID
   readonly generatePkce?: () => { verifier: string; challenge: string };
 }
 
 // The path this module's consent form posts to, and the path Cognito's app client is configured
-// to redirect back to — named here as the one place both halves of the wiring (this file, and
-// whichever future task adds the HTTP routes) read the same strings from.
+// to redirect back to (both legs share the SAME callback URL) — named here as the one place both
+// halves of the wiring (this file, and whichever future task adds the HTTP routes) read the same
+// strings from.
 export const CALLBACK_PATH = "/oauth/callback";
 export const CONSENT_SUBMIT_PATH = "/oauth/consent";
 
@@ -132,6 +157,17 @@ const badRequest = (description: string): Response =>
     headers: { "content-type": "application/json" },
   });
 
+// fix round 1, Important 2: `Response.redirect(...)` returns a Response with IMMUTABLE headers
+// (`headers.set` throws `TypeError: immutable`), so nothing downstream can attach
+// `Cache-Control: no-store` to it — and every redirect this file issues either carries a live
+// single-use code/state or points at Cognito with a single-use PKCE challenge, so none of them
+// should ever be cached. Built as a plain `Response` instead, everywhere, so `cache-control` is
+// always present and always settable.
+const redirectResponse = (location: string): Response =>
+  new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
+
+const originOf = (resource: string): string => new URL(resource).origin;
+
 // Once redirect_uri is trusted (it came back from redirectUriAllowed, or from our OWN stored
 // record — never the raw request again), further errors answer via a standard OAuth error
 // redirect: legible to the client, and carrying `iss` per RFC 9207 on every authorization
@@ -141,15 +177,26 @@ const buildErrorRedirect = (redirectUri: string, resource: string, opts: { error
   url.searchParams.set("error", opts.error);
   url.searchParams.set("error_description", opts.description);
   if (opts.state !== undefined) url.searchParams.set("state", opts.state);
-  url.searchParams.set("iss", new URL(resource).origin);
-  return Response.redirect(url.toString(), 302);
+  url.searchParams.set("iss", originOf(resource));
+  return redirectResponse(url.toString());
+};
+
+const finalClientRedirect = (redirectUri: string, code: string, clientState: string | undefined, resource: string): Response => {
+  const url = new URL(redirectUri);
+  url.searchParams.set("code", code);
+  if (clientState !== undefined) url.searchParams.set("state", clientState);
+  url.searchParams.set("iss", originOf(resource)); // RFC 9207, success path too
+  return redirectResponse(url.toString());
 };
 
 type ScopeParseResult = { readonly ok: true; readonly scopes: string[] } | { readonly ok: false; readonly message: string };
 
 // F5 (spec §4.2, measured against the beta pool): Cognito fails the WHOLE authorization with
 // invalid_request when a custom scope belongs to a different resource, opaquely. Caught HERE
-// instead, before we ever redirect to Cognito, and said legibly.
+// instead, before we ever redirect to Cognito, and said legibly. Kept even though leg 1 now
+// always caps its OWN Cognito request at read (below) — a client naming a foreign resource's
+// scope is still a malformed request worth refusing loudly, and requestedScopes is recorded for
+// audit regardless of what gets granted.
 const parseRequestedScopes = (scopeParam: string | undefined, resource: string): ScopeParseResult => {
   const read = readScopeOf(resource);
   const write = writeScopeOf(resource);
@@ -179,14 +226,19 @@ const defaultGeneratePkce = (): { verifier: string; challenge: string } => {
 // Step 1 — GET /authorize
 // ---------------------------------------------------------------------------------------------
 
+// fix round 1, Important 3: every field bounded. Probed: an unbounded `state`/`code_challenge`
+// let a 600 KB stored record past DynamoDB's 400 KB item limit, so `putRequest` would throw
+// AFTER the golfer had already authenticated — a 500 with no recovery. Caps mirror clients.ts's
+// own request-schema bounds (`client_id` <= 2048 matches its CIMD cap); `code_challenge`'s 128 is
+// RFC 7636's own maximum length for the parameter.
 const authorizeQuerySchema = z.object({
-  client_id: z.string().min(1),
-  redirect_uri: z.string().min(1),
-  response_type: z.string().min(1),
-  code_challenge: z.string().min(1),
-  code_challenge_method: z.string().min(1),
-  state: z.string().optional(),
-  scope: z.string().optional(),
+  client_id: z.string().min(1).max(2048),
+  redirect_uri: z.string().min(1).max(2048),
+  response_type: z.string().min(1).max(64),
+  code_challenge: z.string().min(1).max(128),
+  code_challenge_method: z.string().min(1).max(16),
+  state: z.string().max(512).optional(),
+  scope: z.string().max(512).optional(),
 });
 
 const QUERY_KEYS = ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state", "scope"] as const;
@@ -259,10 +311,16 @@ export const handleAuthorize = async (request: Request, deps: AuthorizeDeps): Pr
   });
   await deps.store.putRequest(requestId, record);
 
-  // Bind the CANONICAL resource on the Cognito redirect, with S256 PKCE (brief; spec F2/F3): a
-  // `resource` that doesn't name a registered resource server yields a code that cannot be
-  // redeemed, reported as an ordinary invalid_grant pointing nowhere near the real cause — so
-  // this is never optional and never a second, re-derived string.
+  // fix round 1, Critical 1: leg 1 NEVER requests more than read from Cognito, no matter what
+  // the client asked for (`scopesResult.scopes` is stored above for audit/F5, not sent here).
+  // A golfer who never reaches — or never approves past — consent therefore has NO path to a
+  // write-scoped Cognito token; only beginWriteStepUp's silent leg 2 ever requests write, and
+  // only after an explicit "read_write" approval.
+  //
+  // Binds the CANONICAL resource, with S256 PKCE (brief; spec F2/F3): a `resource` that doesn't
+  // name a registered resource server yields a code that cannot be redeemed, reported as an
+  // ordinary invalid_grant pointing nowhere near the real cause — so this is never optional and
+  // never a second, re-derived string.
   const cognitoUrl = new URL(`${deps.cognito.domain}/oauth2/authorize`);
   cognitoUrl.searchParams.set("response_type", "code");
   cognitoUrl.searchParams.set("client_id", deps.cognito.clientId);
@@ -271,13 +329,14 @@ export const handleAuthorize = async (request: Request, deps: AuthorizeDeps): Pr
   cognitoUrl.searchParams.set("code_challenge", pkce.challenge);
   cognitoUrl.searchParams.set("code_challenge_method", "S256");
   cognitoUrl.searchParams.set("resource", deps.resource);
-  cognitoUrl.searchParams.set("scope", scopesResult.scopes.join(" "));
+  cognitoUrl.searchParams.set("scope", readScopeOf(deps.resource));
 
-  return Response.redirect(cognitoUrl.toString(), 302);
+  return redirectResponse(cognitoUrl.toString());
 };
 
 // ---------------------------------------------------------------------------------------------
-// Step 2 — GET /oauth/callback (Cognito's redirect back to us)
+// The Cognito token exchange — shared by leg 1 and leg 2. Exchanges immediately; Cognito's code
+// expires in five minutes (design spec §4.3).
 // ---------------------------------------------------------------------------------------------
 
 interface CognitoTokens {
@@ -352,6 +411,13 @@ const hostnameOrFallback = (uri: string): string => {
   return hostname !== "" ? hostname : uri;
 };
 
+// ---------------------------------------------------------------------------------------------
+// Step 2 — GET /oauth/callback (Cognito's redirect back to us). Dispatches on the STORED
+// record's phase — "pending" (leg 1, first-ever hop) or "leg2-pending" (the silent write
+// step-up) — never on anything in the request itself, since the requestId IS the correlation
+// key and the record it was stored under says which leg this is.
+// ---------------------------------------------------------------------------------------------
+
 export const handleCallback = async (request: Request, deps: AuthorizeDeps): Promise<Response> => {
   const url = new URL(request.url);
   const requestId = url.searchParams.get("state");
@@ -360,11 +426,22 @@ export const handleCallback = async (request: Request, deps: AuthorizeDeps): Pro
 
   if (requestId === null) return badRequest("callback is missing state");
 
-  const pending = await deps.store.takeRequest(requestId);
-  if (pending === undefined || pending.phase !== "pending") {
-    return badRequest("authorization request not found or expired");
-  }
+  const record = await deps.store.takeRequest(requestId);
+  if (record === undefined) return badRequest("authorization request not found or expired");
 
+  if (record.phase === "pending") return finishLeg1(record, cognitoCode, cognitoError, deps);
+  if (record.phase === "leg2-pending") return finishLeg2(record, cognitoCode, cognitoError, deps);
+  // A "consent" record replayed at the callback URL — not a valid hop, and the record is
+  // already consumed by the takeRequest above regardless, so there's nothing left to redeem.
+  return badRequest("authorization request not found or expired");
+};
+
+const finishLeg1 = async (
+  pending: PendingAuthorizeRequest,
+  cognitoCode: string | null,
+  cognitoError: string | null,
+  deps: AuthorizeDeps,
+): Promise<Response> => {
   if (cognitoError !== null || cognitoCode === null) {
     return buildErrorRedirect(pending.redirectUri, deps.resource, {
       error: cognitoError ?? "server_error",
@@ -373,8 +450,8 @@ export const handleCallback = async (request: Request, deps: AuthorizeDeps): Pro
     });
   }
 
-  // Exchange Cognito's code IMMEDIATELY — it expires in five minutes (design spec §4.3), and
-  // consent has not rendered yet, so nothing else has had a chance to spend that window.
+  // Exchange Cognito's code IMMEDIATELY — it expires in five minutes, and consent has not
+  // rendered yet, so nothing else has had a chance to spend that window.
   const tokens = await exchangeCognitoCode(cognitoCode, pending.cognitoCodeVerifier, deps);
   if (tokens === undefined) {
     return buildErrorRedirect(pending.redirectUri, deps.resource, {
@@ -403,16 +480,61 @@ export const handleCallback = async (request: Request, deps: AuthorizeDeps): Pro
   });
   await deps.store.putRequest(consentId, consentRecord);
 
-  return renderConsentPage(consentId, consentRecord, deps.resource);
+  return renderConsentPage(consentId, consentRecord);
+};
+
+const finishLeg2 = async (
+  record: Leg2PendingAuthorizeRequest,
+  cognitoCode: string | null,
+  cognitoError: string | null,
+  deps: AuthorizeDeps,
+): Promise<Response> => {
+  if (cognitoError !== null || cognitoCode === null) {
+    return buildErrorRedirect(record.redirectUri, deps.resource, {
+      error: cognitoError ?? "server_error",
+      description: "authorization failed upstream at Cognito (write step-up)",
+      state: record.clientState,
+    });
+  }
+
+  const tokens = await exchangeCognitoCode(cognitoCode, record.cognitoCodeVerifier, deps);
+  if (tokens === undefined) {
+    return buildErrorRedirect(record.redirectUri, deps.resource, {
+      error: "server_error",
+      description: "token exchange with Cognito failed (write step-up)",
+      state: record.clientState,
+    });
+  }
+
+  // Consent was already granted in step 3 (handleConsentSubmit's "read_write" branch) — this leg
+  // exists ONLY to fetch a token that genuinely carries write, so the client's code is minted
+  // here, directly, bound to THESE tokens.
+  const generateId = deps.generateId ?? randomUUID;
+  const code = generateId();
+  const grant: AuthorizeCodeGrant = omitUndefined({
+    clientId: record.clientId,
+    redirectUri: record.redirectUri,
+    approvedScopes: record.approvedScopes,
+    codeChallenge: record.codeChallenge,
+    codeChallengeMethod: record.codeChallengeMethod,
+    cognitoAccessToken: tokens.accessToken,
+    cognitoRefreshToken: tokens.refreshToken,
+  });
+  await deps.store.putCode(code, grant);
+
+  return finalClientRedirect(record.redirectUri, code, record.clientState, deps.resource);
 };
 
 // ---------------------------------------------------------------------------------------------
 // The consent page — server-rendered HTML, no client-side JS (brief; spec §4.3's "a proxy
 // holding a static upstream client id MUST obtain consent per registered client before
-// forwarding").
+// forwarding"). fix round 1, Critical 2: the read/write choice is offered UNCONDITIONALLY —
+// never gated on what the client requested. Spec §4.4 names the client's own scope request as
+// precisely the thing that must NOT decide this; gating the choice on it reintroduces that
+// defect.
 // ---------------------------------------------------------------------------------------------
 
-const renderConsentPage = (consentId: string, record: ConsentAuthorizeRequest, resource: string): Response => {
+const renderConsentPage = (consentId: string, record: ConsentAuthorizeRequest): Response => {
   // The client name is ATTACKER-SUPPLIED (DCR body or a fetched CIMD document) and is about to
   // be written into HTML — escaped, not trusted. A consent page that can be made to lie about
   // who is asking defeats the page's entire purpose.
@@ -423,19 +545,6 @@ const renderConsentPage = (consentId: string, record: ConsentAuthorizeRequest, r
     ? `<p class="warning">Every redirect address registered for this app is a loopback address (your own device). If you did not just start this from a local tool, do not approve.</p>`
     : "";
 
-  const write = writeScopeOf(resource);
-  const offersWrite = record.requestedScopes.includes(write);
-
-  // Spec §4.4: the client chooses the scope SET (what's offered here), the golfer chooses how
-  // much of it to grant. A golfer can never end up with more than was requested.
-  const scopeChoiceHtml = offersWrite
-    ? `<p>
-         <label><input type="radio" name="scope_choice" value="read" checked> Read-only — view your rounds and courses</label><br>
-         <label><input type="radio" name="scope_choice" value="read_write"> Read and write — also record scores and manage rounds</label>
-       </p>`
-    : `<input type="hidden" name="scope_choice" value="read">
-       <p>This app is asking for read-only access — view your rounds and courses.</p>`;
-
   const html = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Authorize ${clientLabel}</title></head>
@@ -445,37 +554,55 @@ const renderConsentPage = (consentId: string, record: ConsentAuthorizeRequest, r
 ${loopbackWarning}
 <form method="POST" action="${CONSENT_SUBMIT_PATH}">
 <input type="hidden" name="consent_id" value="${escapeHtml(consentId)}">
-${scopeChoiceHtml}
+<p>
+<label><input type="radio" name="scope_choice" value="read" checked> Read-only — view your rounds and courses</label><br>
+<label><input type="radio" name="scope_choice" value="read_write"> Read and write — also record scores and manage rounds</label>
+</p>
 <button type="submit" name="action" value="approve">Approve</button>
 <button type="submit" name="action" value="deny">Deny</button>
 </form>
 </body>
 </html>`;
 
-  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // fix round 1, Important 2: clickjacking an invisible Approve button is the canonical
+      // attack on this exact page (OAuth 2.0 Security BCP §4.9). This page also carries a
+      // live, single-use approve nonce (consent_id) for up to ten minutes — never cached.
+      "content-security-policy": "frame-ancestors 'none'",
+      "x-frame-options": "DENY",
+      "cache-control": "no-store",
+    },
+  });
 };
 
 // ---------------------------------------------------------------------------------------------
-// Step 3 — POST /oauth/consent (on approve, mint the client's code; on deny, mint nothing)
+// Step 3 — POST /oauth/consent. Read-only mints the code directly, from the leg-1 (necessarily
+// read-only) tokens already held. "read_write" mints NOTHING here — it starts the silent leg-2
+// step-up (beginWriteStepUp); the code is minted afterward, in finishLeg2, from tokens Cognito
+// actually issued for read+write.
 // ---------------------------------------------------------------------------------------------
 
-const approvedScopesFrom = (requestedScopes: readonly string[], scopeChoice: string | null, resource: string): string[] => {
-  const read = readScopeOf(resource);
-  if (scopeChoice === "read") return requestedScopes.includes(read) ? [read] : [];
-  // "read_write", or anything else submitted — grant everything the client requested and the
-  // golfer therefore had the option to approve. Never more than requestedScopes: this function
-  // has no way to add a scope that wasn't already there.
-  return [...requestedScopes];
-};
+const MAX_FORM_FIELD_LENGTH = 512;
 
 export const handleConsentSubmit = async (request: Request, deps: AuthorizeDeps): Promise<Response> => {
+  // fix round 1, Minor: pin the method and content-type — a bare form-shaped body on any verb
+  // used to mint a code.
+  if (request.method !== "POST") return badRequest("consent must be submitted via POST");
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
+    return badRequest("consent submission must be application/x-www-form-urlencoded");
+  }
+
   const bodyText = await request.text();
   const body = new URLSearchParams(bodyText);
   const consentId = body.get("consent_id");
   const action = body.get("action");
   const scopeChoice = body.get("scope_choice");
 
-  if (consentId === null) return badRequest("missing consent_id");
+  if (consentId === null || consentId.length > MAX_FORM_FIELD_LENGTH) return badRequest("missing or invalid consent_id");
 
   const record = await deps.store.takeRequest(consentId);
   if (record === undefined || record.phase !== "consent") {
@@ -490,26 +617,63 @@ export const handleConsentSubmit = async (request: Request, deps: AuthorizeDeps)
     });
   }
 
-  // The code carries ONLY the scopes actually approved at this page — never the requested set.
-  const approvedScopes = approvedScopesFrom(record.requestedScopes, scopeChoice, deps.resource);
+  // fix round 1, Important 1: FAIL CLOSED. Only the exact string "read_write" grants write —
+  // probed forms (omitted, "", "READ", "read " with a trailing space, "anything") must all fall
+  // through to read-only, the least-privilege default for the one function whose entire job is
+  // least privilege.
+  if (scopeChoice === "read_write") {
+    return beginWriteStepUp(record, deps);
+  }
 
   const generateId = deps.generateId ?? randomUUID;
   const code = generateId();
   const grant: AuthorizeCodeGrant = omitUndefined({
     clientId: record.clientId,
     redirectUri: record.redirectUri,
-    approvedScopes,
+    approvedScopes: [readScopeOf(deps.resource)],
     codeChallenge: record.codeChallenge,
     codeChallengeMethod: record.codeChallengeMethod,
+    // These are leg-1 tokens — READ-ONLY, always, per handleAuthorize's scope cap. Nothing
+    // write-capable was ever issued for a golfer who picks this branch.
     cognitoAccessToken: record.cognitoAccessToken,
     cognitoRefreshToken: record.cognitoRefreshToken,
   });
   await deps.store.putCode(code, grant);
 
-  const redirectUrl = new URL(record.redirectUri);
-  redirectUrl.searchParams.set("code", code);
-  if (record.clientState !== undefined) redirectUrl.searchParams.set("state", record.clientState);
-  // RFC 9207 issuer identification, on the success path too.
-  redirectUrl.searchParams.set("iss", new URL(deps.resource).origin);
-  return Response.redirect(redirectUrl.toString(), 302);
+  return finalClientRedirect(record.redirectUri, code, record.clientState, deps.resource);
+};
+
+// The silent write step-up: a SECOND Cognito authorize hop, requesting read+write, using a
+// fresh PKCE pair and a fresh stored record. "Silent" because the golfer already holds an active
+// Cognito hosted-UI session from leg 1 (same browser, same domain) — Cognito itself decides not
+// to re-prompt for credentials; nothing in this file simulates that, it simply relies on it.
+const beginWriteStepUp = async (record: ConsentAuthorizeRequest, deps: AuthorizeDeps): Promise<Response> => {
+  const generateId = deps.generateId ?? randomUUID;
+  const generatePkce = deps.generatePkce ?? defaultGeneratePkce;
+  const leg2Id = generateId();
+  const pkce = generatePkce();
+
+  const leg2Record: Leg2PendingAuthorizeRequest = omitUndefined({
+    phase: "leg2-pending",
+    clientId: record.clientId,
+    redirectUri: record.redirectUri,
+    clientState: record.clientState,
+    codeChallenge: record.codeChallenge,
+    codeChallengeMethod: record.codeChallengeMethod,
+    approvedScopes: [readScopeOf(deps.resource), writeScopeOf(deps.resource)],
+    cognitoCodeVerifier: pkce.verifier,
+  });
+  await deps.store.putRequest(leg2Id, leg2Record);
+
+  const cognitoUrl = new URL(`${deps.cognito.domain}/oauth2/authorize`);
+  cognitoUrl.searchParams.set("response_type", "code");
+  cognitoUrl.searchParams.set("client_id", deps.cognito.clientId);
+  cognitoUrl.searchParams.set("redirect_uri", deps.cognito.callbackUrl);
+  cognitoUrl.searchParams.set("state", leg2Id);
+  cognitoUrl.searchParams.set("code_challenge", pkce.challenge);
+  cognitoUrl.searchParams.set("code_challenge_method", "S256");
+  cognitoUrl.searchParams.set("resource", deps.resource);
+  cognitoUrl.searchParams.set("scope", `${readScopeOf(deps.resource)} ${writeScopeOf(deps.resource)}`);
+
+  return redirectResponse(cognitoUrl.toString());
 };

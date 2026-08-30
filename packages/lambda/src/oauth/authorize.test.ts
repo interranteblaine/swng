@@ -13,8 +13,10 @@ import { CALLBACK_PATH, handleAuthorize, handleCallback, handleConsentSubmit } f
 const createFakeStore = () => {
   const requests = new Map<string, AuthorizeRequestRecord>();
   const codes = new Map<string, AuthorizeCodeGrant>();
+  let putRequestCallCount = 0;
   return {
     putRequest: async (id: string, value: AuthorizeRequestRecord) => {
+      putRequestCallCount += 1;
       requests.set(id, value);
     },
     takeRequest: async (id: string) => {
@@ -27,6 +29,7 @@ const createFakeStore = () => {
     },
     debugCodeCount: async () => codes.size,
     debugPeekCode: (code: string) => codes.get(code),
+    debugPutRequestCallCount: () => putRequestCallCount,
   };
 };
 
@@ -171,6 +174,19 @@ describe("handleAuthorize", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
+  it("400s an oversized field with NO Location and NO stored record (fix round 2, was M10-survivable)", async () => {
+    const { deps, store } = buildDeps({});
+    // Any one of these alone exceeds authorizeQuerySchema's own bound (state/scope <= 512,
+    // code_challenge <= 128) — the review's own probe was a 300 KB state + 300 KB code_challenge
+    // producing a 600 KB stored record, past DynamoDB's 400 KB item ceiling, AFTER the golfer had
+    // already authenticated. This must never reach putRequest at all.
+    const oversizedState = "s".repeat(600_000);
+    const res = await handleAuthorize(authorizeRequest({ ...baseParams, state: oversizedState }), deps);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
+    expect(store.debugPutRequestCallCount()).toBe(0);
+  });
+
   it("refuses a scope the resource server does not own", async () => {
     const { deps } = buildDeps({});
     const res = await handleAuthorize(authorizeRequest({ ...baseParams, scope: "https://other-resource.example/admin" }), deps);
@@ -196,6 +212,25 @@ describe("handleAuthorize", () => {
     const location = new URL(approveRes.headers.get("location")!);
     expect(location.searchParams.get("iss")).toBe(new URL(CANONICAL).origin);
     expect(location.searchParams.get("code")).not.toBeNull();
+  });
+
+  it("carries Cache-Control: no-store on the code-carrying redirect (fix round 2, was M11-survivable)", async () => {
+    // fix round 1's own trap: Response.redirect(...) returns a Response with IMMUTABLE headers,
+    // so nothing downstream could ever attach no-store to it. redirectResponse fixed that by
+    // building a plain Response instead — but nothing pinned it, so a silent revert back to
+    // Response.redirect would strip this header and every one of the other 19 tests would still
+    // pass, since none of them look at cache-control on the code-carrying response.
+    const { fetchImpl } = buildFetchSpy();
+    const { deps, store } = buildDeps({ fetchImpl });
+    const { consentId } = await driveToConsent(deps);
+
+    const approveRes = await handleConsentSubmit(consentSubmitRequest({ consent_id: consentId, action: "approve", scope_choice: "read" }), {
+      ...deps,
+      store,
+    });
+    expect(approveRes.status).toBe(302);
+    expect(approveRes.headers.get("location")).not.toBeNull(); // this IS the code-carrying redirect
+    expect(approveRes.headers.get("cache-control")).toContain("no-store");
   });
 });
 
@@ -359,28 +394,39 @@ describe("handleConsentSubmit", () => {
     expect(calls).toEqual(["cognito-code-leg1", "cognito-code-leg2"]);
   });
 
-  it("rejects a non-POST submission", async () => {
+  it("rejects a non-POST submission — an OTHERWISE-VALID form body that would mint a code if the method guard were gone", async () => {
     const { fetchImpl } = buildFetchSpy();
     const { deps, store } = buildDeps({ fetchImpl });
     const { consentId } = await driveToConsent(deps);
 
-    const req = new Request("https://mcp.beta.swng.golf/oauth/consent?consent_id=" + consentId + "&action=approve&scope_choice=read", {
+    // Fix round 2: the body here is a genuine, well-formed, form-urlencoded approve — the ONLY
+    // thing wrong with this request is the method. Deleting the `request.method !== "POST"`
+    // guard must turn this test red (a code gets minted); putting parameters in the query string
+    // with no body (round 1's version) 400s regardless of the guard, on "missing consent_id",
+    // and proves nothing.
+    const req = new Request("https://mcp.beta.swng.golf/oauth/consent", {
       method: "PUT",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ consent_id: consentId, action: "approve", scope_choice: "read" }),
     });
     const res = await handleConsentSubmit(req, { ...deps, store });
     expect(res.status).toBe(400);
     expect(await store.debugCodeCount()).toBe(0);
   });
 
-  it("rejects a submission that isn't form-urlencoded", async () => {
+  it("rejects a submission that isn't form-urlencoded — an OTHERWISE-VALID form BODY under the wrong content-type", async () => {
     const { fetchImpl } = buildFetchSpy();
     const { deps, store } = buildDeps({ fetchImpl });
     const { consentId } = await driveToConsent(deps);
 
+    // Fix round 2: the BODY is genuinely form-urlencoded and would mint a code on its own — only
+    // the Content-Type header lies about it. Round 1's version sent a JSON body, which 400s on
+    // "missing consent_id" (URLSearchParams can't parse JSON) regardless of whether the
+    // content-type guard exists at all, so it never actually exercised the guard.
     const req = new Request("https://mcp.beta.swng.golf/oauth/consent", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent_id: consentId, action: "approve", scope_choice: "read" }),
+      headers: { "content-type": "text/plain" },
+      body: new URLSearchParams({ consent_id: consentId, action: "approve", scope_choice: "read" }).toString(),
     });
     const res = await handleConsentSubmit(req, { ...deps, store });
     expect(res.status).toBe(400);

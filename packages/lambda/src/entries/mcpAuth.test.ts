@@ -496,6 +496,16 @@ describe("mcpAuth /authorize — every CIMD failure is one indistinguishable ans
         dnsLookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
       },
     ],
+    [
+      // Fix round 2, NEW-1: `new URL(location, target)` threw a TypeError before the guard written
+      // for it could run, so five characters of attacker-controlled header answered 500 — one
+      // request, from a host the attacker owns, driving the function's 5xx alarm.
+      "the document answers a redirect whose Location cannot be parsed",
+      () => {
+        dnsLookupMock.mockResolvedValue(PUBLIC_ADDRESS);
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 302, headers: { location: "http://[" } })));
+      },
+    ],
   ];
 
   const probe = async (setup: () => void): Promise<APIGatewayProxyStructuredResultV2> => {
@@ -515,7 +525,27 @@ describe("mcpAuth /authorize — every CIMD failure is one indistinguishable ans
     expect(result.statusCode).toBe(400);
   });
 
-  it("answers the four cases with the SAME bytes — nothing about the host is readable back", async () => {
+  // Fix round 2, item 4. The one-message design puts the diagnosis in exactly ONE place — the
+  // `cause` this log line unwraps — which raises that line's stakes rather than lowering them.
+  // Asserted as a PROPERTY (the operator can still tell these apart) and not as a shape: field
+  // names, level and ordering stay free to change.
+  it.each([
+    ["a resolution failure", 0, "ENOTFOUND"],
+    ["a private-address refusal, whose cause is a plain string, not an Error", 3, "127.0.0.1"],
+  ])("still tells the operator what actually happened for %s", async (_name, index, expected) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const [, setup] = NETWORK_FAILURES[index] as [string, () => void];
+
+      await probe(setup);
+
+      expect(warn.mock.calls.flat().join(" ")).toContain(expected);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("answers every one of them with the SAME bytes — nothing about the host is readable back", async () => {
     const answers: string[] = [];
     for (const [, setup] of NETWORK_FAILURES) {
       const result = await probe(setup);
@@ -525,7 +555,7 @@ describe("mcpAuth /authorize — every CIMD failure is one indistinguishable ans
     }
 
     expect(new Set(answers).size).toBe(1);
-    // Named, not merely compared to itself: four identical 500s would also be a set of one.
+    // Named, not merely compared to itself: five identical 500s would also be a set of one.
     expect(JSON.parse(JSON.parse(answers[0] as string).body as string)).toEqual({
       error: "invalid_request",
       error_description: "the client_id could not be resolved",
@@ -575,6 +605,14 @@ describe("mcpAuth protected-resource metadata path derivation", () => {
 
   it("serves the SDK's path when MCP_RESOURCE carries a trailing slash", async () => {
     await expect(statusFor("https://mcp.beta.swng.golf/mcp/", "/.well-known/oauth-protected-resource/mcp")).resolves.toBe(200);
+  });
+
+  // Fix round 2, NEW-5: greedy stripping agreed with the SDK on every realistic input and diverged
+  // on exactly one — the SDK removes ONE slash, so `…/mcp//` derives `…/mcp/`, where the greedy
+  // rule derived `…/mcp` and 404'd the URL the SDK's own challenge names.
+  it("strips exactly one trailing slash, as the SDK does — a doubled slash keeps the inner one", async () => {
+    await expect(statusFor("https://mcp.beta.swng.golf/mcp//", "/.well-known/oauth-protected-resource/mcp/")).resolves.toBe(200);
+    await expect(statusFor("https://mcp.beta.swng.golf/mcp//", "/.well-known/oauth-protected-resource/mcp")).resolves.toBe(404);
   });
 
   it("serves the bare document for a resource with no path — and not a stray trailing-slash twin", async () => {

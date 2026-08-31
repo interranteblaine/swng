@@ -367,9 +367,16 @@ describe("fetchCimdClient — SSRF protection", () => {
     expect(oversizedButValid.length).toBeGreaterThan(CIMD_MAX_BYTES);
     expect(() => JSON.parse(oversizedButValid)).not.toThrow();
     const fetchImpl = vi.fn(async () => jsonResponse(oversizedButValid));
+    // Fix round 2, NEW-2: asserted by MESSAGE, not merely by type. This refusal is raised INSIDE
+    // the `readBodyWithCap` try that fix round 1 wrapped, which makes it the one deliberate
+    // ClientRegistrationError whose passage through `asCimdFetchFailure`'s passthrough branch is
+    // OBSERVABLE — the timeout's abort reason takes that branch too, but its own rejection now
+    // comes from the deadline (see the budget tests), so it cannot witness the branch. With a
+    // type-only assertion here, flattening the passthrough — making every error wear the uniform
+    // network message — was invisible to the entire suite.
     return expect(
       fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/exceeds the \d+-byte cap/);
   });
 
   it("accepts a response at or under the 64 KB cap", async () => {
@@ -390,7 +397,11 @@ describe("fetchCimdClient — SSRF protection", () => {
         });
       });
       const promise = fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl: fetchImpl as unknown as typeof fetch, resolveHost: publicResolveHost });
-      const assertion = expect(promise).rejects.toThrow();
+      // By MESSAGE (fix round 2): the deadline has to answer with its OWN refusal, not the
+      // uniform network message — a timeout is the one CIMD failure a caller can distinguish
+      // without learning anything, since it is only reachable for a host that already resolved
+      // publicly and then hung.
+      const assertion = expect(promise).rejects.toThrow(/timed out/);
       await vi.advanceTimersByTimeAsync(5_001);
       await assertion;
     } finally {
@@ -403,6 +414,98 @@ describe("fetchCimdClient — SSRF protection", () => {
     await expect(fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost })).rejects.toThrow(
       ClientRegistrationError,
     );
+  });
+});
+
+// Fix round 2, NEW-1. `new URL(location, target)` was evaluated INSIDE the `tryParseUrl(...)`
+// call, so a malformed `Location` threw `TypeError: Invalid URL` straight out of the module and
+// answered an unauthenticated 500 at `/authorize` — while the ClientRegistrationError written for
+// exactly this case sat below it as unreachable dead code. Five characters of header, from a host
+// the attacker already owns, and one request drives the function's 5xx alarm.
+describe("fetchCimdClient — a malformed redirect Location", () => {
+  const redirectTo = (location: string): Response => new Response(null, { status: 302, headers: { location } });
+
+  it.each(["http://[", "https://%", "http://a b.com/", "https://exa mple.com/x"])(
+    "refuses Location %s as a ClientRegistrationError rather than throwing a TypeError",
+    async (location) => {
+      await expect(
+        fetchCimdClient("https://app.example.com/id", {
+          clock: fixedClock,
+          fetchImpl: vi.fn(async () => redirectTo(location)),
+          resolveHost: publicResolveHost,
+        }),
+      ).rejects.toThrow(ClientRegistrationError);
+    },
+  );
+
+  it("keeps its own descriptive message — a malformed document, not network-layer noise", async () => {
+    await expect(
+      fetchCimdClient("https://app.example.com/id", {
+        clock: fixedClock,
+        fetchImpl: vi.fn(async () => redirectTo("http://[")),
+        resolveHost: publicResolveHost,
+      }),
+    ).rejects.toThrow(/redirect Location is not a valid URL/);
+  });
+});
+
+// Fix round 2, item 2. The uniform message for network-layer failures was never the thing holding
+// the line: these two refusals named `<host> -> 10.0.0.5`, which is strictly MORE than the status
+// bit fix round 1 closed. A future caller that forwarded a ClientRegistrationError message would
+// hand a stranger our internal address map.
+describe("assertPublicHttpsUrl refusals — the resolved address is not in the message", () => {
+  const refusalFor = async (addresses: readonly string[]): Promise<ClientRegistrationError> =>
+    fetchCimdClient("https://internal.example.com/id", {
+      clock: fixedClock,
+      fetchImpl: vi.fn(async () => jsonResponse(cimdDoc("https://internal.example.com/id"))),
+      resolveHost: async () => addresses,
+    }).then(
+      () => {
+        throw new Error("expected a refusal");
+      },
+      (error: unknown) => error as ClientRegistrationError,
+    );
+
+  it("a private-address refusal names the hostname the caller sent, never the address it resolved to", async () => {
+    const error = await refusalFor(["10.0.0.5"]);
+
+    expect(error.message).toContain("internal.example.com");
+    expect(error.message).not.toContain("10.0.0.5");
+    // The operator still gets it — on `cause`, which only the log reads.
+    expect(String(error.cause)).toContain("10.0.0.5");
+  });
+
+  it("a non-IP resolution answer is withheld the same way", async () => {
+    const error = await refusalFor(["not-an-ip"]);
+
+    expect(error.message).not.toContain("not-an-ip");
+    expect(String(error.cause)).toContain("not-an-ip");
+  });
+});
+
+// Fix round 2, NEW-4. `dns.promises.lookup` takes no AbortSignal, and the deadline used to be
+// armed AFTER the first resolution — so a hostname whose resolution hangs held the invocation for
+// the function's whole timeout, on a leg whose client budget is 10 s. An unauthenticated caller
+// chooses that hostname.
+describe("fetchCimdClient — the 5 s budget bounds the whole operation, DNS included", () => {
+  it("rejects at the deadline when the RESOLVER hangs, not just when the fetch does", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => jsonResponse(cimdDoc("https://app.example.com/id")));
+      const promise = fetchCimdClient("https://app.example.com/id", {
+        clock: fixedClock,
+        fetchImpl,
+        resolveHost: () => new Promise<readonly string[]>(() => undefined), // never settles
+      });
+      const assertion = expect(promise).rejects.toThrow(/timed out/);
+
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      await assertion;
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

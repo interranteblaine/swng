@@ -90,10 +90,20 @@ const stripTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 // challenge point at `…/oauth-protected-resource/mcp` while this served `…/mcp/` — and per the
 // client's guarded fallback, a 404 there is a hard connection failure, not a slow path. This is
 // the one seam where a hand-rolled derivation and the SDK's must agree byte for byte.
-const protectedResourceMetadataPathsFor = (resource: string): ReadonlySet<string> => {
-  const resourcePath = stripTrailingSlash(new URL(resource).pathname);
-  return new Set([PROTECTED_RESOURCE_METADATA_PATH, `${PROTECTED_RESOURCE_METADATA_PATH}${resourcePath}`]);
+//
+// Fix round 2, NEW-5: this is the SDK's rule COPIED, not approximated. `stripTrailingSlash` above
+// is greedy (`/\/+$/`), which is right for the Cognito domain and WRONG here: the SDK strips
+// exactly one slash, and only when the path is longer than "/", so `…/mcp//` derives `…/mcp/`
+// where the greedy version derived `…/mcp` — a 404, and per the client's guarded fallback a hard
+// connection failure. Two different rules for two different values, each matching what consumes
+// it.
+const sdkResourcePath = (pathname: string): string => {
+  const stripped = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  return stripped === "/" ? "" : stripped;
 };
+
+const protectedResourceMetadataPathsFor = (resource: string): ReadonlySet<string> =>
+  new Set([PROTECTED_RESOURCE_METADATA_PATH, `${PROTECTED_RESOURCE_METADATA_PATH}${sdkResourcePath(new URL(resource).pathname)}`]);
 
 // ---------------------------------------------------------------------------------------------
 // Responses this file owns (everything else is a handler's own Response, returned verbatim)
@@ -232,6 +242,15 @@ const routeRegister = async (request: Request, store: ClientStore): Promise<Resp
   }
 };
 
+// The `cause` channel carries two shapes and both have to survive into the log: an ERROR for the
+// network-layer failures clients.ts wraps (fix round 1), and a STRING for the resolved address the
+// SSRF refusal keeps out of its own message (fix round 2). Rendering only the first would silently
+// drop exactly the detail the second exists to preserve.
+const describeCause = (cause: unknown): string | undefined => {
+  if (cause === undefined) return undefined;
+  return cause instanceof Error ? (cause.stack ?? cause.message) : String(cause);
+};
+
 const routeAuthorize = async (request: Request, deps: AuthorizeDeps): Promise<Response> => {
   try {
     return await handleAuthorize(request, deps);
@@ -244,9 +263,12 @@ const routeAuthorize = async (request: Request, deps: AuthorizeDeps): Promise<Re
     // URI is not yet trusted, which is the whole reason that function refuses to redirect its
     // early errors).
     //
-    // The message is LOGGED, never forwarded: those messages name resolved addresses
-    // ("…resolved to a private address"), which would turn this unauthenticated endpoint into a
-    // DNS/network oracle for an attacker probing what our VPC can see.
+    // The message is LOGGED, never forwarded. THIS FIXED BODY IS THE LOAD-BEARING CONTROL (fix
+    // round 2, correcting fix round 1's own claim): clients.ts giving every network-layer failure
+    // one message is defence in depth, not the guarantee — `assertPublicHttpsUrl` still names the
+    // hostname it refused, and only this response shape keeps any of it from reaching a stranger.
+    // Echoing `error.message` here re-opens the oracle in one line, which is why two tests fail
+    // the moment anyone does.
     // The `cause` is where the real DNS/TLS/socket failure lives now (fix round 1, Important 1:
     // clients.ts gives every network-layer failure ONE fixed message so the answer can't be read
     // as an oracle) — so the operator's log has to unwrap it, or the diagnosis is gone.
@@ -255,7 +277,7 @@ const routeAuthorize = async (request: Request, deps: AuthorizeDeps): Promise<Re
         level: "warn",
         message: "mcpAuth: /authorize could not resolve the client",
         error: error.message,
-        cause: error.cause instanceof Error ? (error.cause.stack ?? error.cause.message) : undefined,
+        cause: describeCause(error.cause),
       }),
     );
     return jsonResponse({ error: "invalid_request", error_description: "the client_id could not be resolved" }, 400);

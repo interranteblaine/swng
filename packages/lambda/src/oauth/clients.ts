@@ -510,12 +510,17 @@ const assertPublicHttpsUrl = async (url: URL, resolveHost: HostResolver): Promis
   }
   for (const address of addresses) {
     const family = isIP(address);
+    // Fix round 2: the RESOLVED ADDRESS never appears in the message — it rides on `cause`, which
+    // only the operator's log reads. These two refusals used to name `${hostname} -> 10.0.0.5`,
+    // which is strictly MORE than the status-code bit fix round 1 closed: a future caller that
+    // forwarded a ClientRegistrationError message would hand a stranger our internal address map,
+    // not merely "that name resolves". The hostname stays — the caller sent it to us.
     if (family === 0) {
-      throw new ClientRegistrationError(`client_id host resolved to a non-IP address: ${hostname} -> ${address}`);
+      throw new ClientRegistrationError(`client_id host resolved to a non-IP address: ${hostname}`, { cause: `${hostname} -> ${address}` });
     }
     const isPrivate = family === 4 ? isPrivateIPv4(address) : isPrivateIPv6(address);
     if (isPrivate) {
-      throw new ClientRegistrationError(`client_id host resolves to a private address: ${hostname} -> ${address}`);
+      throw new ClientRegistrationError(`client_id host resolves to a private address: ${hostname}`, { cause: `${hostname} -> ${address}` });
     }
   }
 };
@@ -591,18 +596,38 @@ export const fetchCimdClient = async (clientIdUrl: string, deps: FetchCimdDeps):
   const fetchImpl = deps.fetchImpl ?? fetch;
   const resolveHost = deps.resolveHost ?? defaultResolveHost;
 
-  const cached = await deps.cache?.get(clientIdUrl);
-  if (cached) return cached;
-
-  let target = tryParseUrl(clientIdUrl);
-  if (!target) throw new ClientRegistrationError(`client_id is not a valid URL: ${clientIdUrl}`);
-  await assertPublicHttpsUrl(target, resolveHost);
-  const originalOrigin = target.origin;
-
+  // Fix round 2, NEW-4: the deadline is armed BEFORE anything reaches the network, and it bounds
+  // the WHOLE operation rather than just the fetches. It used to be armed after the first
+  // `assertPublicHttpsUrl`, and `dns.promises.lookup` takes no AbortSignal at all, so a hostname
+  // whose resolution hangs left this pending well past CIMD_TIMEOUT_MS (measured: still pending
+  // at 6 s against an 8 s resolver). That let an UNAUTHENTICATED caller hold an invocation for
+  // the function's entire timeout with one query string, on a leg where the client's own budget
+  // is 10 s — and it is the one code-controlled amplifier of the residual DNS timing channel.
+  //
+  // The signal still aborts an in-flight fetch, so no socket is left dangling; the RACE is what
+  // bounds the lookup, which cannot be cancelled — the invocation answers on time even though the
+  // resolver is still working somewhere behind us. `Promise.race` attaches handlers to both
+  // promises, so whichever one loses cannot become an unhandled rejection.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new ClientRegistrationError("client metadata document fetch timed out")), CIMD_TIMEOUT_MS);
+  let expire: (() => void) | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    expire = (): void => {
+      const expiry = new ClientRegistrationError("client metadata document fetch timed out");
+      controller.abort(expiry);
+      reject(expiry);
+    };
+  });
+  const timeout = setTimeout(() => expire?.(), CIMD_TIMEOUT_MS);
 
-  try {
+  const fetchDocument = async (): Promise<ClientRecord> => {
+    const cached = await deps.cache?.get(clientIdUrl);
+    if (cached) return cached;
+
+    let target = tryParseUrl(clientIdUrl);
+    if (!target) throw new ClientRegistrationError(`client_id is not a valid URL: ${clientIdUrl}`);
+    await assertPublicHttpsUrl(target, resolveHost);
+    const originalOrigin = target.origin;
+
     for (let hop = 0; ; hop++) {
       if (hop > CIMD_MAX_REDIRECTS) {
         throw new ClientRegistrationError(`client metadata document fetch followed more than ${CIMD_MAX_REDIRECTS} redirects`);
@@ -623,7 +648,22 @@ export const fetchCimdClient = async (clientIdUrl: string, deps: FetchCimdDeps):
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
         if (!location) throw new ClientRegistrationError("client metadata document redirect had no Location header");
-        const next = tryParseUrl(new URL(location, target).toString());
+        // Fix round 2, NEW-1: `new URL(location, target)` was evaluated INSIDE the tryParseUrl
+        // call, so it threw `TypeError: Invalid URL` before tryParseUrl could ever return
+        // undefined — making the guard below unreachable dead code, and answering an
+        // unauthenticated 500 on `/authorize` for a five-character `Location: http://[`. The
+        // relative-resolution parse is the one that can throw, so it is the one that is guarded.
+        //
+        // This keeps its OWN descriptive message rather than wearing CIMD_FETCH_FAILED: a
+        // malformed Location is a malformed DOCUMENT — the class `/authorize` already answers
+        // with a description of its own — and it says nothing about our network, since the
+        // attacker owns the host that sent it.
+        let next: URL | undefined;
+        try {
+          next = new URL(location, target);
+        } catch {
+          next = undefined;
+        }
         if (!next) throw new ClientRegistrationError(`client metadata document redirect Location is not a valid URL: ${location}`);
         if (next.origin !== originalOrigin) {
           throw new ClientRegistrationError(`client metadata document fetch followed a cross-host redirect to ${next.origin}`);
@@ -654,6 +694,10 @@ export const fetchCimdClient = async (clientIdUrl: string, deps: FetchCimdDeps):
       }
       return record;
     }
+  };
+
+  try {
+    return await Promise.race([deadline, fetchDocument()]);
   } finally {
     clearTimeout(timeout);
   }

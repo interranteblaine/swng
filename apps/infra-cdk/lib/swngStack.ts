@@ -1532,8 +1532,11 @@ export class SwngStack extends Stack {
           exposeHeaders: ["WWW-Authenticate"],
           // Without this the browser re-preflights before nearly every tool call — an extra
           // round trip against the 10 s budget spec §3.4 gives the whole exchange, paid on every
-          // call rather than once (re-review, Minor K). Ten minutes is the ceiling Chromium
-          // honours; Firefox caps lower and simply caches for less.
+          // call rather than once (re-review, Minor K). 600 s is the largest value EVERY engine
+          // honours in full: it is WebKit's hard cap (maxPreflightCacheTimeout = 600s), while
+          // Chromium caps at 7200 s and Firefox at 86400 s. With no header at all the default is
+          // 5 s. (Corrected in re-review 2, Minor 6 — the first version of this comment had both
+          // browsers wrong, naming Chromium's pre-v76 cap as though it were current.)
           maxAge: Duration.minutes(10),
         },
         defaultDomainMapping: { domainName: mcpDomainName },

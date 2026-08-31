@@ -143,6 +143,10 @@ const policyStatementsFor = (roleIdPrefix: RegExp): Array<Record<string, unknown
 // against the serialized statement so both spellings and any nesting are covered.
 const grants = (statements: Array<Record<string, unknown>>, actionPrefix: string, resourceLogicalId: string): boolean =>
   statements.some((statement) => {
+    // `Effect` is load-bearing and was ignored here (re-review 2, Important 4): an explicit DENY on
+    // the very table a positive assertion names satisfied "mcp can reach the rounds table" while
+    // the deployed function could reach nothing. A statement with no Effect defaults to Allow.
+    if ((statement.Effect ?? "Allow") !== "Allow") return false;
     const actions = Array.isArray(statement.Action) ? (statement.Action as string[]) : [String(statement.Action)];
     if (!actions.some((action) => action.startsWith(actionPrefix))) return false;
     return JSON.stringify(statement.Resource).includes(`"${resourceLogicalId}"`);
@@ -310,6 +314,13 @@ describe("who is wired to whom (the relationships a property assertion cannot se
   });
 });
 
+// The logical id of the one resource matching a predicate, shaped as the template would Ref it.
+const refTo = (resourceType: string, predicate: (properties: Record<string, unknown>) => boolean): { Ref: string } => ({
+  Ref: findLogicalId(resourceType, predicate),
+});
+
+const tableRef = (nameFragment: string): { Ref: string } => refTo("AWS::DynamoDB::Table", (p) => String(p.TableName).includes(nameFragment));
+
 describe("what the first fix round's own falsification set did not test", () => {
   // -------------------------------------------------------------------------------------------
   // Re-review of fix round 1. My own falsification set tested the ten mutations my new assertions
@@ -338,25 +349,80 @@ describe("what the first fix round's own falsification set did not test", () => 
     // Dropped (review row #5), the 401's WWW-Authenticate is unreadable from a browser — and that
     // header IS the discovery entry point, so the client has nowhere to go and no way to say why.
     expect(cors.ExposeHeaders).toEqual(expect.arrayContaining(["WWW-Authenticate"]));
-    expect(cors.MaxAge, "no max-age means a preflight before nearly every tool call").toBeGreaterThan(0);
+    // Re-review 2, Minor 5: `toBeGreaterThan(0)` accepted one second — un-making this round's own
+    // production change while passing the very test written to protect it. A brand-new any-number
+    // assertion, in the commit that fixed "asserted as any number". Pin the value.
+    expect(cors.MaxAge).toBe(600);
   });
 
-  it("every environment value is pinned to the RESOURCE it must name, not merely present", () => {
-    // Review row #8 and re-review Important C: asserting a KEY exists catches a deletion and
-    // nothing else. Each of these swaps deploys clean and fails at a different distance — the
-    // Cognito domain sends the golfer's browser to a host that does not exist, and the table swap
-    // points the authorization server at a table it has no grant on.
-    const oauthTableId = findLogicalId("AWS::DynamoDB::Table", (p) => p.TableName === "swng-mcp-oauth-beta");
-    const coreTableId = findLogicalId("AWS::DynamoDB::Table", (p) => String(p.TableName).includes("core"));
-    const authEnv = environmentOf(/^McpAuthFunction/);
+  it("EVERY environment variable on both functions, as a whole set — not a sample", () => {
+    // Re-review 2, Importants 1 and 2. The version this replaces pinned three values by EXAMPLE,
+    // and one of those by SUBSTRING. Eight of mcp's eleven stayed key-only: a bogus USER_POOL_ID
+    // (every request 401s forever) passed, TABLE_PROJECTIONS pointed at the snapshots table
+    // passed, and COGNITO_DOMAIN + "/oauth2" still "contained amazoncognito.com" while every
+    // sign-in 404s at Cognito.
+    //
+    // The finding named a CLASS, so the answer is the whole set rather than more examples:
+    // `toEqual` on the entire environment object. A swapped value fails, and so does a NEW
+    // variable nobody thought to assert — which no list of individual expectations can do.
+    const mcpClient = refTo("AWS::Cognito::UserPoolClient", (p) => String(p.ClientName ?? "").includes("mcp"));
 
-    expect(authEnv.TABLE_MCP_OAUTH).toEqual({ Ref: oauthTableId });
-    expect(environmentOf(/^McpFunction/).TABLE_CORE).toEqual({ Ref: coreTableId });
+    expect(environmentOf(/^McpFunction/)).toEqual({
+      STAGE: "beta",
+      MCP_RESOURCE: CANONICAL,
+      MCP_CLIENT_ID: mcpClient,
+      USER_POOL_ID: refTo("AWS::Cognito::UserPool", (p) => p.UserPoolName !== undefined),
+      TABLE_ROUNDS: tableRef("rounds"),
+      TABLE_CORE: tableRef("core"),
+      TABLE_PROJECTIONS: tableRef("projections"),
+      TABLE_SNAPSHOTS: tableRef("snapshots"),
+      TABLE_CONNECTIONS: tableRef("connections"),
+      TOKEN_SECRET_ARN: refTo("AWS::SecretsManager::Secret", (p) => p.Name === "swng-token-secret-beta"),
+      WS_ENDPOINT: expect.objectContaining({ "Fn::Join": expect.anything() }),
+    });
 
-    // The hosted-UI origin, never the canonical URI — they are both "a URL we hold in a constant"
-    // and nothing but this assertion tells them apart.
-    expect(JSON.stringify(authEnv.COGNITO_DOMAIN)).toContain("amazoncognito.com");
-    expect(JSON.stringify(authEnv.COGNITO_DOMAIN)).not.toContain(MCP_HOST);
+    expect(environmentOf(/^McpAuthFunction/)).toEqual({
+      MCP_RESOURCE: CANONICAL,
+      TABLE_MCP_OAUTH: tableRef("mcp-oauth"),
+      MCP_CLIENT_ID: mcpClient,
+      MCP_CLIENT_SECRET_ARN: refTo("AWS::SecretsManager::Secret", (p) => p.Name === "swng-mcp-client-secret-beta"),
+      // The hosted-UI origin EXACTLY — nothing appended. The region stays an unresolved `Ref`
+      // because this stack is synthesized without an env; `cdk synth` against the real account
+      // renders the same expression as `us-east-1`.
+      COGNITO_DOMAIN: {
+        "Fn::Join": [
+          "",
+          ["https://", refTo("AWS::Cognito::UserPoolDomain", (p) => p.Domain !== undefined), ".auth.", { Ref: "AWS::Region" }, ".amazoncognito.com"],
+        ],
+      },
+    });
+  });
+
+  it("both functions carry the size and timeout the two-Lambda split exists to give them", () => {
+    // Re-review 2, Minor 7: mcpAuth's 1024 MB / 15 s is the entire stated reason it is a separate
+    // function from mcp, and nothing asserted it — 128 MB / 3 s passed, which is a cold-start
+    // timeout on a human-interactive sign-in hop.
+    const propsOf = (prefix: RegExp): Record<string, unknown> => {
+      const entry = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) => prefix.test(id));
+      expect(entry, `no AWS::Lambda::Function matching ${prefix}`).toBeDefined();
+      return entry![1].Properties as Record<string, unknown>;
+    };
+    expect(propsOf(/^McpAuthFunction/)).toMatchObject({ MemorySize: 1024, Timeout: 15 });
+    expect(propsOf(/^McpFunction/)).toMatchObject({ MemorySize: 512, Timeout: 15 });
+  });
+
+  it("neither MCP role carries a managed policy beyond basic execution", () => {
+    // Re-review 2, Important 3: the wildcard guard below reads INLINE policies only, so attaching
+    // `AmazonDynamoDBFullAccess` as a MANAGED policy handed mcp the OAuth table's live codes and
+    // held tokens while all three "mcp cannot touch it" assertions stayed green. Both roles already
+    // carry a ManagedPolicyArns entry, so this was a door standing open, not a hypothetical.
+    for (const prefix of [/^McpFunctionServiceRole/, /^McpAuthFunctionServiceRole/]) {
+      const roleId = Object.keys(template.findResources("AWS::IAM::Role")).find((id) => prefix.test(id));
+      expect(roleId, `no AWS::IAM::Role matching ${prefix}`).toBeDefined();
+      const arns = template.findResources("AWS::IAM::Role")[roleId!].Properties.ManagedPolicyArns as unknown[];
+      expect(arns, `${roleId} carries more than basic execution`).toHaveLength(1);
+      expect(JSON.stringify(arns)).toContain("AWSLambdaBasicExecutionRole");
+    }
   });
 
   it("mcp keeps the grants its tool surface actually needs", () => {

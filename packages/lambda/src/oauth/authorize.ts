@@ -33,8 +33,13 @@ import { CONSENT_SUBMIT_PATH } from "./paths.js";
 // `${resource}/read` and `${resource}/write` — the only two scopes this AS ever grants.
 // ---------------------------------------------------------------------------------------------
 
-const readScopeOf = (resource: string): string => `${resource}/read`;
-const writeScopeOf = (resource: string): string => `${resource}/write`;
+// EXPORTED (swng-speaks-mcp Task 20): apps/infra-cdk registers these two scopes on the Cognito
+// resource server, by NAME, in a file that cannot import this one at synth time. Measured F5: a
+// custom scope that does not belong to the requested resource fails /authorize with
+// invalid_request, so a rename on either side breaks every connection — pinned against the
+// synthesized template by apps/infra-cdk/test/mcpCanonical.test.ts.
+export const readScopeOf = (resource: string): string => `${resource}/read`;
+export const writeScopeOf = (resource: string): string => `${resource}/write`;
 
 // ---------------------------------------------------------------------------------------------
 // Stored record shapes — three phases, all in Task 14's `request` slot (10 min, single-use).

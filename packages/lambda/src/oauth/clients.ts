@@ -58,7 +58,12 @@ export class ClientRegistrationError extends Error {
 // internal names — the exact leak withholding the message was supposed to close. Distinguishing
 // them here, even in a message no caller sees today, would put the oracle one careless
 // `error_description` away from being live again.
-const CIMD_FETCH_FAILED = "client metadata document could not be fetched";
+// EXPORTED (swng-speaks-mcp Task 20): apps/infra-cdk puts a CloudWatch metric filter on this
+// exact string. Because the answer is uniform, this log line is the ONLY thing that distinguishes
+// a total egress/DNS outage from one client's typo'd client_id — so the filter's literal is
+// pinned to this constant by apps/infra-cdk/test/mcpCanonical.test.ts. Renaming it without that
+// test going red would leave the alarm matching nothing, forever, silently.
+export const CIMD_FETCH_FAILED = "client metadata document could not be fetched";
 
 // A raw throw from the network is a client-supplied document we could not obtain — the caller's
 // input, not our fault, and therefore the same 400 every other CIMD verdict earns. A

@@ -1,19 +1,20 @@
 import { join } from "node:path";
-import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, RemovalPolicy, SecretValue, Stack, type StackProps } from "aws-cdk-lib";
 import { Alarm, ComparisonOperator, Dashboard, GraphWidget, LogQueryWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
-import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
+import { CfnRoute, CfnStage, CorsHttpMethod, DomainName, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
-import { CfnManagedLoginBranding, CfnUserPoolClient, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
+import { CfnManagedLoginBranding, CfnUserPoolClient, FeaturePlan, ManagedLoginVersion, OAuthScope, ResourceServerScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { Distribution, HeadersFrameOption, HeadersReferrerPolicy, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { FilterPattern, MetricFilter } from "aws-cdk-lib/aws-logs";
 import { ARecord, AaaaRecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
-import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
+import { ApiGatewayv2DomainProperties, CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
@@ -66,6 +67,15 @@ export interface SwngStackProps extends StackProps {
   /** Pin Cognito's PreventUserExistenceErrors to ENABLED (stops user-enumeration on sign-in/reset).
    *  Prod: true. Beta omits it (byte-identical — CDK renders no line when absent). Default undefined. */
   readonly preventUserExistenceErrors?: boolean;
+  /** swng-speaks-mcp design §6: the MCP endpoint and its mediating authorization server. Same
+   *  shape as `web` above and the same rule: OPTIONAL, and a stage without it synthesizes
+   *  byte-identical to before this prop existed (spec §10.4 — beta only in this arc; prod keeps
+   *  serving its current build untouched). hostedZoneId/zoneName identify the ALREADY-PROVISIONED
+   *  Route 53 zone this stack imports; domainName is the host it mints a cert for and claims.
+   *  The canonical MCP resource URI is DERIVED from domainName (`https://<host>/mcp`) rather than
+   *  configured separately — spec §4.3's "one constant, three roles" only holds if there is
+   *  exactly one place it comes from. */
+  readonly mcp?: { readonly domainName: string; readonly hostedZoneId: string; readonly zoneName: string };
 }
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
@@ -217,6 +227,63 @@ export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod;
   { method: HttpMethod.PUT, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses" },
+];
+
+// --- The MCP surface's own route table (swng-speaks-mcp design §6) ------------------------
+//
+// Declared beside HTTP_ROUTES for the same reason: the API's shape belongs in the template and
+// the console, not hidden inside a Lambda. It matters more here than there. `entries/mcpAuth.ts`
+// dispatches on the NORMALIZED pathname, so `POST /authorize/../token` reaches handleToken —
+// harmless as things stand, and unreachable at the gateway once every route key is explicit. A
+// single `ANY /{proxy+}` would hand every malformed and traversal-shaped path straight to that
+// switch and remove the one structural guard against it.
+//
+// The METHOD on each row is the one that surface actually serves (the browser leg is GET, the
+// credential-bearing legs are POST) — a request on any other verb is a gateway 404 rather than
+// reaching the dispatcher at all.
+//
+// These paths are the SAME STRINGS packages/lambda/src/oauth/paths.ts serves and metadata.ts
+// advertises. Nothing in a CDK synth can import them (see test/mcpCanonical.test.ts's own note),
+// so the coupling is a parity test — the identical mechanism routesParity.test.ts already
+// provides for HTTP_ROUTES, and the one this arc has now had to install three times for retyped
+// literals. A comment is not a mechanism.
+
+/** The canonical resource's own path. `https://<mcp host>/mcp` is simultaneously the MCP endpoint
+ *  URL, the Cognito resource server identifier and the PRM `resource` (spec §4.3, measured F3),
+ *  so this ONE constant is also the `POST` route below and the suffix RFC 9728 §3.1 appends to
+ *  the protected-resource metadata path. */
+export const MCP_ENDPOINT_PATH = "/mcp";
+/** Typed once: it is both a route below AND the Cognito app client's registered callback URL, and
+ *  Cognito matches that EXACTLY. `packages/lambda/src/oauth/paths.ts`'s CALLBACK_PATH is the
+ *  authority; the parity test pins these together. */
+export const MCP_CALLBACK_PATH = "/oauth/callback";
+export const MCP_CONSENT_PATH = "/oauth/consent";
+
+/** The `mcp` function's one route. */
+export const MCP_ROUTE: { readonly method: HttpMethod; readonly path: string } = { method: HttpMethod.POST, path: MCP_ENDPOINT_PATH };
+
+/** The eight surfaces `entries/mcpAuth.ts` routes (its own path switch, plus the resource-suffixed
+ *  protected-resource document RFC 9728 §3.1 requires). */
+export const MCP_AUTH_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
+  // RFC 9728 §3.1 serves this document at BOTH the bare path (a client that never saw a 401
+  // challenge asks for that one) and the path with the resource's own path appended (what the
+  // SDK's getOAuthProtectedResourceMetadataUrl puts in every challenge). A 404 on the advertised
+  // one is a hard connection failure, not a slow path.
+  { method: HttpMethod.GET, path: "/.well-known/oauth-protected-resource" },
+  { method: HttpMethod.GET, path: `/.well-known/oauth-protected-resource${MCP_ENDPOINT_PATH}` },
+  // RFC 8414 §3.1 — served at the bare path ONLY: its issuer is the origin, and §3.3 has the
+  // client refuse a document whose issuer disagrees with where it was fetched from.
+  { method: HttpMethod.GET, path: "/.well-known/oauth-authorization-server" },
+  // RFC 7591 DCR, the deprecated fallback for a client that never learned CIMD. POST only —
+  // routeRegister answers anything else 405, and a GET would reach it with an empty body.
+  { method: HttpMethod.POST, path: "/register" },
+  // The browser legs: the golfer's own sign-in and Cognito's redirect back. Both read only the
+  // query string.
+  { method: HttpMethod.GET, path: "/authorize" },
+  { method: HttpMethod.GET, path: MCP_CALLBACK_PATH },
+  // The two that mint or redeem a credential — POST, always, and pinned in the handlers too.
+  { method: HttpMethod.POST, path: MCP_CONSENT_PATH },
+  { method: HttpMethod.POST, path: "/token" },
 ];
 
 // packages/lambda/src/entries/*.ts — resolved relative to this file so bundling works
@@ -1242,6 +1309,299 @@ export class SwngStack extends Stack {
       `https://${distribution.distributionDomainName}/`,
       ...(webDomain ? [`https://${webDomain.domainName}/`] : []),
     ];
+
+    // --- MCP (swng-speaks-mcp design §6) --------------------------------------------------
+    //
+    // EVERYTHING in this block hangs off `props.mcp`. A stage without the prop (prod, this arc —
+    // spec §10.4) synthesizes byte-identical to before the block existed, which is what the
+    // existing prop-less template test proves; if that test ever fails, the gate leaked and the
+    // fix is the gate, not the test.
+    //
+    // The whole design turns on ONE string. `canonical` is derived here, once, from the
+    // configured host — the MCP endpoint URL, the Cognito resource server identifier, and the
+    // PRM `resource` are all this expression (spec §4.3, measured F3: a Cognito resource server
+    // identifier may carry a path). Drift between any two of them is not a loud failure: per F2
+    // the authorization code is still issued, and then simply cannot be redeemed, reported as an
+    // ordinary invalid_grant that points nowhere near the cause. test/mcpCanonical.test.ts reads
+    // all of them back off the synthesized template for exactly that reason.
+    const mcp = props.mcp;
+    if (mcp) {
+      const canonical = `https://${mcp.domainName}${MCP_ENDPOINT_PATH}`;
+
+      // The OAuth mediation store (spec §6): registered clients, in-flight authorization
+      // requests, held Cognito tokens awaiting consent, authorization codes, refresh handles —
+      // one pk-only item shape for all five (adapters-dynamodb/src/keys.ts's oauth* prefixes).
+      // DESTROY, alone among this stack's tables, and deliberately: every item here is
+      // short-lived state a client re-creates by re-authorizing, so there is nothing to retain
+      // (the same story connectionsTable tells). `ttl` is storage hygiene ONLY — DynamoDB deletes
+      // on its own schedule, up to 48h late, so createDynamoOAuthStore checks `expiresAtMs` on
+      // every read and never trusts the sweep.
+      const oauthTable = new Table(this, "McpOAuthTable", {
+        tableName: `swng-mcp-oauth-${stage}`,
+        partitionKey: { name: "pk", type: AttributeType.STRING },
+        billingMode: BillingMode.PAY_PER_REQUEST,
+        removalPolicy: RemovalPolicy.DESTROY,
+        timeToLiveAttribute: "ttl",
+      });
+
+      // Spec §4.2 F3: the identifier IS the canonical URI, path and all — that is the single
+      // measured fact this whole design rests on. F5: a custom scope must belong to the resource
+      // being requested, so both scopes are declared here and referenced through
+      // OAuthScope.resourceServer below, which renders them as `<identifier>/read` and
+      // `<identifier>/write` from this same construct. Never a second typed copy of either.
+      const readScope = new ResourceServerScope({ scopeName: "read", scopeDescription: "Read your swng rounds, courses and crews" });
+      const writeScope = new ResourceServerScope({ scopeName: "write", scopeDescription: "Record scores and manage your swng rounds" });
+      const mcpResourceServer = userPool.addResourceServer("McpResourceServer", {
+        identifier: canonical,
+        userPoolResourceServerName: `swng-mcp-${stage}`,
+        scopes: [readScope, writeScope],
+      });
+
+      // CONFIDENTIAL, unlike the web's public SPA client (spec §6). The secret is what makes
+      // Cognito's own refresh token useless outside this stack, which is why /token can hand out
+      // an opaque handle of its own instead of passing Cognito's through (spec §4.3).
+      //
+      // NOT `openid`: spec §4.3 requests neither an ID token nor OIDC scopes — `sub` is already
+      // in the access token — and per F5 the custom scopes are the ones that must be attached
+      // here for resource binding to work at all.
+      const mcpUserPoolClient = new UserPoolClient(this, "McpUserPoolClient", {
+        userPool,
+        userPoolClientName: `swng-mcp-${stage}`,
+        generateSecret: true,
+        oAuth: {
+          flows: { authorizationCodeGrant: true },
+          // The SAME two scope objects the resource server registers, so the app client cannot end
+          // up allowed a scope that was never declared (F5 again): each renders as the resource
+          // server's own identifier joined to the scope name, never a second typed string.
+          scopes: [OAuthScope.resourceServer(mcpResourceServer, readScope), OAuthScope.resourceServer(mcpResourceServer, writeScope)],
+          // Cognito matches a callback EXACTLY. This is the same MCP_CALLBACK_PATH the route
+          // table above declares — one constant, both halves, because the path Cognito redirects
+          // to and the path this API routes have to be the same string or the browser leg dies
+          // at a gateway 404 with the golfer already signed in.
+          callbackUrls: [`https://${mcp.domainName}${MCP_CALLBACK_PATH}`],
+          // No `logoutUrls` at all — omitted, not an empty array, so CDK renders no LogoutURLs
+          // property whatsoever. The mediated flow has no logout leg (spec §4.3's four steps): a
+          // golfer ends an MCP grant by disconnecting the connector, never by being redirected
+          // through Cognito's /logout, so there is no URL to register and nothing for Cognito to
+          // validate on the first deploy.
+        },
+      });
+
+      // Spec §6, measured F6: a managed-login-v2 pool renders "Login pages unavailable. Please
+      // contact an administrator." — no form, no error code — for an app client with no branding
+      // resource of its own. The web client's branding does NOT cover this client. Same settings
+      // and assets as the web's: it is the same product, and the golfer signing in to authorize
+      // an agent should see the same sign-in page they always see.
+      new CfnManagedLoginBranding(this, "McpManagedLoginBranding", {
+        userPoolId: userPool.userPoolId,
+        clientId: mcpUserPoolClient.userPoolClientId,
+        useCognitoProvidedValues: false,
+        settings: managedLoginSettings,
+        assets: managedLoginAssets,
+      });
+
+      // Cognito GENERATES the client secret; nothing may supply one. The L1's `ClientSecret`
+      // attribute is how it leaves CloudFormation without a describe-the-client custom resource,
+      // and SecretValue.resourceAttribute is the sanctioned way to carry an attribute into a
+      // secret's value. The plaintext never appears in the template — the rendered SecretString
+      // is a Fn::GetAtt — and, exactly like TOKEN_SECRET_ARN (Arc A Task 4), only the ARN rides
+      // in the Lambda's environment; the function fetches the value itself at runtime under an
+      // audited GetSecretValue grant.
+      const cfnMcpUserPoolClient = mcpUserPoolClient.node.defaultChild as CfnUserPoolClient;
+      const mcpClientSecret = new Secret(this, "McpClientSecret", {
+        secretName: `swng-mcp-client-secret-${stage}`,
+        secretStringValue: SecretValue.resourceAttribute(cfnMcpUserPoolClient.attrClientSecret),
+      });
+
+      // The MCP endpoint itself: the whole application behind one bearer-token gate. Built like
+      // httpFn — same sharedEnv, same table env, same grants below — because it dispatches the
+      // SAME routes through the SAME composition root; only the transport and the credential
+      // differ. USER_POOL_CLIENT_ID is deliberately absent: that is the WEB client's id, used by
+      // buildApp only to construct its own ID-token verifier, and this entry supplies its own
+      // access-token AccountVerifier instead (entries/mcp.ts's createMcpVerifiers).
+      const mcpFn = makeFunction("McpFunction", "mcp");
+      mcpFn.addEnvironment("TABLE_CORE", coreTable.tableName);
+      mcpFn.addEnvironment("TABLE_PROJECTIONS", projectionsTable.tableName);
+      mcpFn.addEnvironment("TABLE_SNAPSHOTS", snapshotsTable.tableName);
+      mcpFn.addEnvironment("USER_POOL_ID", userPool.userPoolId);
+      mcpFn.addEnvironment("WS_ENDPOINT", webSocketStage.callbackUrl);
+      mcpFn.addEnvironment("MCP_RESOURCE", canonical);
+      mcpFn.addEnvironment("MCP_CLIENT_ID", mcpUserPoolClient.userPoolClientId);
+
+      // The mediating authorization server. NOT built via makeFunction, and that is the point of
+      // the two-Lambda split (spec §3.4): it builds no App, carries no composition root, and must
+      // not be handed sharedEnv's TOKEN_SECRET_ARN/WS_ENDPOINT/table names it has no use for.
+      // Claude allows 10 seconds for discovery, registration and the token endpoint, so this
+      // function's cold start is a budget item — 1024MB (double the rest) buys CPU share for the
+      // one thing it does at init: parse a small bundle and fetch one secret.
+      const mcpAuthFn = new NodejsFunction(this, "McpAuthFunction", {
+        entry: entryPath("mcpAuth"),
+        handler: "handler",
+        runtime: Runtime.NODEJS_20_X,
+        environment: {
+          MCP_RESOURCE: canonical,
+          TABLE_MCP_OAUTH: oauthTable.tableName,
+          // authorize.ts builds `${domain}/oauth2/authorize` and token.ts `${domain}/oauth2/token`
+          // — baseUrl() already carries the scheme and no trailing slash.
+          COGNITO_DOMAIN: userPoolDomain.baseUrl(),
+          MCP_CLIENT_ID: mcpUserPoolClient.userPoolClientId,
+          MCP_CLIENT_SECRET_ARN: mcpClientSecret.secretArn,
+        },
+        timeout: Duration.seconds(15),
+        memorySize: 1024,
+      });
+
+      // --- The MCP API ---------------------------------------------------------------------
+      //
+      // Its own HttpApi, not a second set of routes on the existing one: it answers on its own
+      // host (the canonical URI's), carries a permissive CORS policy the golfer-facing API must
+      // never have, and its two functions are throttled and alarmed apart from the web's.
+      const mcpHostedZone = HostedZone.fromHostedZoneAttributes(this, "McpZone", { hostedZoneId: mcp.hostedZoneId, zoneName: mcp.zoneName });
+      const mcpCertificate = new Certificate(this, "McpCertificate", { domainName: mcp.domainName, validation: CertificateValidation.fromDns(mcpHostedZone) });
+      const mcpDomainName = new DomainName(this, "McpDomainName", { domainName: mcp.domainName, certificate: mcpCertificate });
+
+      const mcpApi = new HttpApi(this, "McpApi", {
+        apiName: `swng-mcp-${stage}`,
+        // Spec §7. Deliberately permissive, and NOT the web API's scoped list: the only credential
+        // this endpoint accepts is a bearer token in a header — no cookie, no ambient authority —
+        // so an Origin allow-list would admit a set that never calls this endpoint while 403-ing
+        // the browser-hosted MCP clients this exists for. `allowHeaders: ["*"]` because the
+        // protocol's own `Mcp-Param-*` family is DYNAMIC and cannot be enumerated; a preflight
+        // that omits one fails the whole request before any of this runs.
+        corsPreflight: {
+          allowOrigins: ["*"],
+          allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST],
+          allowHeaders: ["*"],
+          // A browser can't READ a response header it wasn't given: the 401's
+          // `WWW-Authenticate: Bearer resource_metadata="…"` is the entire discovery entry point
+          // (entries/mcp.ts), and without this a browser-hosted client sees a bare 401 and has
+          // nowhere to go. Never `*` here: the fetch spec ignores a wildcard for a request with
+          // credentials, and naming the one header that matters is the same discipline as the
+          // route table above.
+          exposeHeaders: ["WWW-Authenticate"],
+        },
+        defaultDomainMapping: { domainName: mcpDomainName },
+      });
+
+      const mcpIntegration = new HttpLambdaIntegration("McpIntegration", mcpFn);
+      const mcpAuthIntegration = new HttpLambdaIntegration("McpAuthIntegration", mcpAuthFn);
+      mcpApi.addRoutes({ path: MCP_ROUTE.path, methods: [MCP_ROUTE.method], integration: mcpIntegration });
+      for (const route of MCP_AUTH_ROUTES) {
+        mcpApi.addRoutes({ path: route.path, methods: [route.method], integration: mcpAuthIntegration });
+      }
+
+      // The alias record. A only, no AAAA: an API Gateway regional custom domain is IPv4-only
+      // unless its ipAddressType opts into dualstack, so an AAAA alias here would publish an
+      // address family the endpoint does not answer on — the opposite of the web distribution
+      // above, where CloudFront IS dual-stack and omitting AAAA is what would break IPv6 clients.
+      new ARecord(this, "McpAliasA", {
+        zone: mcpHostedZone,
+        recordName: mcp.domainName,
+        target: RecordTarget.fromAlias(new ApiGatewayv2DomainProperties(mcpDomainName.regionalDomainName, mcpDomainName.regionalHostedZoneId)),
+      });
+
+      // Same stage-wide abuse ceiling as the web API (the constants above), reached through the
+      // same L1 escape hatch. NO per-route settings here: `routeSettings` names routes by KEY
+      // rather than by reference, which is what wedged a deploy once already (the stage update
+      // ran before the route existed and API Gateway 404'd the unknown key) — a stage-wide
+      // default carries no such ordering edge, and every route on this API is anonymous-reachable
+      // anyway, so there is no narrower set worth singling out.
+      if (!mcpApi.defaultStage) {
+        throw new Error("McpApi has no defaultStage — createDefaultStage must stay true for the throttle escape hatch below to apply");
+      }
+      (mcpApi.defaultStage.node.defaultChild as CfnStage).defaultRouteSettings = {
+        throttlingRateLimit: STAGE_THROTTLE_RATE_LIMIT,
+        throttlingBurstLimit: STAGE_THROTTLE_BURST_LIMIT,
+      };
+
+      // --- MCP grants ---------------------------------------------------------------------
+      //
+      // mcpFn's mirror httpFn's exactly (above): the same dispatcher, over the same stores, with
+      // the same broadcast on a score write — a narrower set would 500 the first tool call that
+      // reached a table it couldn't see.
+      roundsTable.grantReadWriteData(mcpFn);
+      coreTable.grantReadWriteData(mcpFn);
+      connectionsTable.grantReadWriteData(mcpFn);
+      snapshotsTable.grantReadWriteData(mcpFn);
+      projectionsTable.grantReadWriteData(mcpFn);
+      webSocketApi.grantManageConnections(mcpFn);
+      tokenSecret.grantRead(mcpFn);
+      // mcpAuth's two, and only these two: it reaches nothing else in this account. Read AND
+      // write on the store — every handler puts, takes or rotates an item.
+      oauthTable.grantReadWriteData(mcpAuthFn);
+      mcpClientSecret.grantRead(mcpAuthFn);
+
+      // --- MCP alarms ---------------------------------------------------------------------
+      //
+      // The same two the web API carries, on the API a golfer's agent actually talks to.
+      pagedWithRecovery(
+        new Alarm(this, "McpApi5xxAlarm", {
+          alarmDescription: "MCP API: >= 10 5xx responses in 2 of the last 3 five-minute windows (sustained server errors)",
+          metric: mcpApi.metricServerError({ period: FIVE_MINUTES, statistic: "Sum" }),
+          threshold: 10,
+          evaluationPeriods: 3,
+          datapointsToAlarm: 2,
+          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        }),
+      );
+      pagedWithRecovery(
+        new Alarm(this, "McpApiP95LatencyAlarm", {
+          alarmDescription: "MCP API: p95 latency over 3000ms in 2 of the last 3 five-minute windows",
+          metric: mcpApi.metricLatency({ period: FIVE_MINUTES, statistic: "p95" }),
+          threshold: 3000,
+          evaluationPeriods: 3,
+          datapointsToAlarm: 2,
+          comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        }),
+      );
+
+      // THE ONE ALARM THAT EXISTS BECAUSE OF AN APPLICATION DECISION, not a symmetry with the web
+      // API. Every failure to fetch a client's metadata document — DNS, TLS, timeout, a refused
+      // private address — answers ONE uniform 400 and logs at warn, deliberately: the response
+      // must not become an oracle that tells a stranger what our network can reach. The cost is
+      // that a total egress or resolver outage is byte-identical, to CloudWatch, to one client's
+      // typo'd client_id: off the function-error metric, off console.error, paging nobody. So the
+      // signal has to come from this side. The metric counts the ONE fixed message
+      // packages/lambda/src/oauth/clients.ts gives every network-layer failure (its
+      // CIMD_FETCH_FAILED constant — pinned to this literal by test/mcpCanonical.test.ts, since a
+      // synth cannot import it).
+      //
+      // A LITERAL filter pattern, not a JSON one: Lambda's default text log format prefixes every
+      // line with a timestamp and request id, so the event is not parseable JSON and `{ $.field =
+      // … }` would silently match nothing. That also means there is no `$.field` to carry a Stage
+      // DIMENSION, which is why the stage rides in the metric NAME here while every EMF metric in
+      // this stack dimensions on it instead.
+      const cimdFetchFailures = new MetricFilter(this, "McpCimdFetchFailureFilter", {
+        logGroup: mcpAuthFn.logGroup,
+        filterPattern: FilterPattern.literal('"client metadata document could not be fetched"'),
+        metricNamespace: "swng",
+        metricName: `McpCimdFetchFailures-${stage}`,
+        metricValue: "1",
+        // Emit a real 0 when nothing matched, so the alarm evaluates on data rather than on the
+        // missing-data policy.
+        defaultValue: 0,
+      });
+      pagedWithRecovery(
+        new Alarm(this, "McpCimdFetchFailureAlarm", {
+          alarmDescription:
+            "MCP authorization server: client metadata documents are failing to fetch, repeatedly — every such failure answers one uniform 400 by design, so this alarm is the only signal that swng's egress or DNS resolution is broken rather than one client having typo'd its client_id",
+          metric: cimdFetchFailures.metric({ period: FIVE_MINUTES, statistic: "Sum" }),
+          // Sustained, not a single burst: one client fumbling its own client_id produces a
+          // handful of failures in ONE window and stops. An egress outage keeps producing them
+          // for as long as it lasts, which is what 2 of 3 windows separates out.
+          threshold: 3,
+          evaluationPeriods: 3,
+          datapointsToAlarm: 2,
+          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        }),
+      );
+
+      // The one string a golfer types into their MCP client.
+      new CfnOutput(this, "McpUrl", { value: canonical });
+    }
 
     // --- Outputs ----------------------------------------------------------------------
 

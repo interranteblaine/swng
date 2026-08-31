@@ -16,9 +16,20 @@ const stage = process.env.STAGE ?? "beta";
 // this table existed). `prod` carries the full hardening set.
 type StageConfig = Omit<SwngStackProps, "stage" | "env">;
 
-const STAGE_CONFIG: Record<string, StageConfig> = {
+// Exported so apps/infra-cdk/test/mcpCanonical.test.ts can assert what the DEPLOY actually
+// carries — a stack test that supplies its own props proves the stack wires them correctly and
+// says nothing about whether this table holds the right ones (or, for `mcp`, holds them for the
+// right stage). Importing this module constructs the app below but never synthesizes it: CDK's
+// App only auto-synths when the CLI sets CDK_OUTDIR, which no test run does.
+export const STAGE_CONFIG: Record<string, StageConfig> = {
   beta: {
     web: { domainName: "beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
+    // swng-speaks-mcp §6/§10.4: BETA ONLY in this arc. `mcp.beta.swng.golf` lives in the same
+    // already-provisioned swng.golf zone the web domain does; the canonical resource URI
+    // (`https://mcp.beta.swng.golf/mcp`) is derived from this host inside the stack, so there is
+    // exactly one place it is written down. prod deliberately carries no `mcp` key at all, which
+    // is what keeps swng-prod synthesizing byte-identical while this ships.
+    mcp: { domainName: "mcp.beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
     // userPasswordAuth / extraWebOrigins / extraCorsOrigins / passwordPolicy / poolDeletionProtection
     // all use the stack's beta-shaped defaults (keeps beta byte-identical to before this table).
   },

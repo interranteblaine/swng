@@ -308,7 +308,10 @@ export const registerDcrClient = async (
 
 export const CIMD_MAX_BYTES = 64 * 1024;
 export const CIMD_TIMEOUT_MS = 5_000;
-const CIMD_MAX_REDIRECTS = 5;
+// Exported for the same single reason CIMD_MAX_BYTES is (fix round 3): the hop-cap test asserts
+// both the refusal's message and the exact number of fetches that preceded it, and a hardcoded 5
+// in the test would silently stop tracking this constant the moment it moved.
+export const CIMD_MAX_REDIRECTS = 5;
 
 // Same shape as the DCR body, minus `client_id` which the fetch loop checks separately (against
 // the URL, not against itself). Bounded for the same "least trustworthy input in this codebase"

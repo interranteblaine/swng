@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "@swng/application";
 import {
   CIMD_MAX_BYTES,
+  CIMD_MAX_REDIRECTS,
   CIMD_MAX_CACHE_TTL_MS,
   MAX_REDIRECT_URI_LENGTH,
   MAX_REDIRECT_URIS_TOTAL_BYTES,
@@ -125,7 +126,7 @@ const publicResolveHost = async (_hostname: string): Promise<string[]> => ["93.1
 
 describe("parseCimdDocument", () => {
   it("rejects a document whose client_id does not equal the URL it was fetched from", () => {
-    expect(() => parseCimdDocument(cimdDoc("https://attacker.example/id"), "https://app.example.com/id")).toThrow(ClientRegistrationError);
+    expect(() => parseCimdDocument(cimdDoc("https://attacker.example/id"), "https://app.example.com/id")).toThrow(/does not match the URL it was fetched from/);
   });
 
   it("accepts a document whose client_id equals the fetch URL", () => {
@@ -135,12 +136,12 @@ describe("parseCimdDocument", () => {
   });
 
   it("rejects a document that is not JSON", () => {
-    expect(() => parseCimdDocument("not json", "https://app.example.com/id")).toThrow(ClientRegistrationError);
+    expect(() => parseCimdDocument("not json", "https://app.example.com/id")).toThrow(/client metadata document is not valid JSON/);
   });
 
   it("rejects a document missing redirect_uris", () => {
     expect(() => parseCimdDocument(JSON.stringify({ client_id: "https://app.example.com/id" }), "https://app.example.com/id")).toThrow(
-      ClientRegistrationError,
+      /failed validation/,
     );
   });
 
@@ -152,7 +153,7 @@ describe("parseCimdDocument", () => {
     "rejects a document whose redirect_uris uses a disallowed scheme (%s)",
     (badUri) => {
       expect(() => parseCimdDocument(cimdDoc("https://app.example.com/id", { redirect_uris: [badUri] }), "https://app.example.com/id")).toThrow(
-        ClientRegistrationError,
+        /failed validation/,
       );
     },
   );
@@ -176,7 +177,7 @@ describe("parseCimdDocument", () => {
   it("rejects a NON-loopback http redirect_uri", () => {
     expect(() =>
       parseCimdDocument(cimdDoc("https://app.example.com/id", { redirect_uris: ["http://app.example.com/cb"] }), "https://app.example.com/id"),
-    ).toThrow(ClientRegistrationError);
+    ).toThrow(/failed validation/);
   });
 
   // Review round 2, Task 16, fix 2 — a redirect_uri with userinfo or a fragment used to register
@@ -188,7 +189,7 @@ describe("parseCimdDocument", () => {
         cimdDoc("https://app.example.com/id", { redirect_uris: ["https://user:pass@app.example.com/cb"] }),
         "https://app.example.com/id",
       ),
-    ).toThrow(ClientRegistrationError);
+    ).toThrow(/failed validation/);
   });
 
   it("rejects a redirect_uri carrying a fragment", () => {
@@ -197,7 +198,7 @@ describe("parseCimdDocument", () => {
         cimdDoc("https://app.example.com/id", { redirect_uris: ["https://app.example.com/cb#frag"] }),
         "https://app.example.com/id",
       ),
-    ).toThrow(ClientRegistrationError);
+    ).toThrow(/failed validation/);
   });
 });
 
@@ -205,7 +206,7 @@ describe("fetchCimdClient — SSRF protection", () => {
   it("refuses a non-https client_id", async () => {
     const fetchImpl = vi.fn();
     await expect(fetchCimdClient("http://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost })).rejects.toThrow(
-      ClientRegistrationError,
+      /must use https/,
     );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -213,37 +214,37 @@ describe("fetchCimdClient — SSRF protection", () => {
   it("refuses an http-only scheme even when the host would otherwise be public", async () => {
     await expect(
       fetchCimdClient("ftp://app.example.com/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/must use https/);
   });
 
   it("refuses a loopback IP literal", async () => {
     await expect(
       fetchCimdClient("https://127.0.0.1/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses a decimal-encoded loopback IP literal (127.0.0.1 == 2130706433)", async () => {
     await expect(
       fetchCimdClient("https://2130706433/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses an octal-encoded loopback IP literal (127.0.0.1 == 0177.0.0.1)", async () => {
     await expect(
       fetchCimdClient("https://0177.0.0.1/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses an IPv6-mapped IPv4 loopback literal", async () => {
     await expect(
       fetchCimdClient("https://[::ffff:127.0.0.1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses the bracketed IPv6 loopback literal [::1]", async () => {
     await expect(
       fetchCimdClient("https://[::1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   // Review round 1, Task 16, fix 1 (Critical) — a reviewer PROBE confirmed `fetchImpl` was
@@ -253,37 +254,37 @@ describe("fetchCimdClient — SSRF protection", () => {
   it("refuses NAT64 (64:ff9b::/96) encoding a private v4 address (10.0.0.5)", async () => {
     await expect(
       fetchCimdClient("https://[64:ff9b::a00:5]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses NAT64 (64:ff9b::/96) encoding loopback (127.0.0.1)", async () => {
     await expect(
       fetchCimdClient("https://[64:ff9b::7f00:1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses 6to4 (2002::/16) encoding loopback (127.0.0.1) — sits INSIDE the 2000::/3 allowlist by construction", async () => {
     await expect(
       fetchCimdClient("https://[2002:7f00:1::]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses deprecated site-local (fec0::/10)", async () => {
     await expect(
       fetchCimdClient("https://[fec0::1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses deprecated IPv4-compatible (::127.0.0.1)", async () => {
     await expect(
       fetchCimdClient("https://[::127.0.0.1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses IPv4-translated (::ffff:0:127.0.0.1)", async () => {
     await expect(
       fetchCimdClient("https://[::ffff:0:127.0.0.1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("allows a genuine global-unicast IPv6 literal — the allowlist must not over-block", async () => {
@@ -301,50 +302,133 @@ describe("fetchCimdClient — SSRF protection", () => {
   it("refuses the link-local range, including the cloud instance-metadata address 169.254.169.254", async () => {
     await expect(
       fetchCimdClient("https://169.254.169.254/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses an RFC1918 IP literal (10.x)", async () => {
     await expect(
       fetchCimdClient("https://10.0.0.5/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses an RFC1918 IP literal (192.168.x)", async () => {
     await expect(
       fetchCimdClient("https://192.168.1.1/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/private address/);
   });
 
   it("refuses a hostname that RESOLVES to a private address", async () => {
     const resolveHost = async (hostname: string) => (hostname === "internal.example.com" ? ["10.0.0.9"] : ["93.184.216.34"]);
     await expect(fetchCimdClient("https://internal.example.com/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost })).rejects.toThrow(
-      ClientRegistrationError,
+      /private address/,
     );
   });
 
-  it("refuses a redirect that lands in private address space after an allowed first hop", async () => {
+  // Fix round 3. The NEW-7 audit deleted every guard in clients.ts one at a time and found five
+  // more that no test named at all — these two, the redirect-hop cap and the two redirect-header
+  // guards below. Each is asserted the same way the rewritten redirect tests are: by the guard's
+  // OWN message, and by the request never happening.
+  it("refuses a hostname that resolves to NO address at all", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      fetchCimdClient("https://nowhere.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: async () => [] }),
+    ).rejects.toThrow(/does not resolve to any address/);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a client_id that is not a URL at all, before any lookup or fetch", async () => {
+    const fetchImpl = vi.fn();
+    const resolveHost = vi.fn();
+
+    await expect(fetchCimdClient("not a url", { clock: fixedClock, fetchImpl, resolveHost })).rejects.toThrow(/is not a valid URL/);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  // BOTH REDIRECT TESTS BELOW WERE HOLLOW (fix round 3, NEW-7): each of the two guards standing
+  // between an attacker's redirect and an arbitrary host could be DELETED with all 517 tests
+  // green, while the module fetched `302 Location: https://internal.corp.example/admin` unchecked
+  // and returned a client record. Two different causes, one shared lesson written into the shape
+  // of both rewrites:
+  //
+  //   1. Asserting `toThrow(ClientRegistrationError)` is nearly worthless in this file now.
+  //      `asCimdFetchFailure` (fix round 1) NORMALISES every raw throw out of `fetchImpl` into
+  //      exactly that type — so a test whose fake threw `new Error("unexpected fetch to …")` when
+  //      the guard let a request through was asserting the wrap, not the guard. Assert the
+  //      MESSAGE the guard itself writes.
+  //   2. Make the UNGUARDED path SUCCEED. Each fake below serves a document that parses, so with
+  //      its guard deleted the call RESOLVES a client record and `rejects` fails outright — no
+  //      dependence on which error a stray throw happens to produce.
+  //
+  // And the call count, because for an SSRF guard the load-bearing property is not "it threw" but
+  // "the request never happened."
+  it("refuses a same-origin redirect whose host REBOUND to a private address between the two checks", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "https://app.example.com/id") return redirectResponse("https://app.example.com/internal-redirect");
-      throw new Error(`unexpected fetch to ${url}`);
+      if (url === "https://app.example.com/id") return redirectResponse("https://app.example.com/id-canonical");
+      return jsonResponse(cimdDoc("https://app.example.com/id"));
     });
-    // Second hop is same-origin (passes the cross-host check) but its DNS resolves privately.
-    const resolveHost = async (hostname: string) => (hostname === "app.example.com" ? ["10.1.2.3"] : ["93.184.216.34"]);
-    await expect(fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost })).rejects.toThrow(
-      ClientRegistrationError,
-    );
+    // The previous version made this host resolve privately ALWAYS, so the FIRST check refused it
+    // and `fetchImpl` was never called — a redirect test that never redirected. A same-origin hop
+    // has the same hostname, so the only way its address can differ from the one already approved
+    // is a rebind: public when the guard asks the first time, private when it asks again.
+    let lookups = 0;
+    const resolveHost = async (): Promise<string[]> => (++lookups === 1 ? ["93.184.216.34"] : ["10.1.2.3"]);
+
+    await expect(fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost })).rejects.toThrow(/private address/);
+
+    expect(lookups).toBe(2); // the per-hop check actually ran on the redirect target
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // and the second hop was never fetched
   });
 
   it("refuses a cross-host redirect even when the redirect target is itself public", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "https://app.example.com/id") return redirectResponse("https://attacker.example/id");
-      throw new Error(`unexpected fetch to ${url}`);
+      // The attacker's document names the ORIGINAL client_id, so it parses and the whole call
+      // succeeds — which is exactly the proven consequence of deleting the guard: "URLs actually
+      // fetched: [app.example.com/id, attacker's host], RESOLVED a client record".
+      return jsonResponse(cimdDoc("https://app.example.com/id"));
     });
+
     await expect(
       fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost }),
-    ).rejects.toThrow(ClientRegistrationError);
+    ).rejects.toThrow(/cross-host redirect/);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a redirect chain longer than the hop cap, having fetched exactly the cap plus one", async () => {
+    // Same-origin every time, so it is ONLY the hop cap that can stop this. With the cap deleted
+    // the loop runs until the 5 s deadline and rejects with `timed out` instead — a different
+    // message, so this fails rather than passing for the wrong reason.
+    let hop = 0;
+    const fetchImpl = vi.fn(async () => redirectResponse(`https://app.example.com/hop-${++hop}`));
+
+    await expect(
+      fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost }),
+    ).rejects.toThrow(new RegExp(`followed more than ${CIMD_MAX_REDIRECTS} redirects`));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(CIMD_MAX_REDIRECTS + 1);
+  });
+
+  it("refuses a redirect with no Location header rather than following it somewhere", async () => {
+    // The unguarded path SUCCEEDS: `new URL(null, target)` coerces to the string "null" and
+    // resolves same-origin, so without the guard the second hop serves a document that parses.
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "https://app.example.com/id") return new Response(null, { status: 302 });
+      return jsonResponse(cimdDoc("https://app.example.com/id"));
+    });
+
+    await expect(
+      fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost }),
+    ).rejects.toThrow(/redirect had no Location header/);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("follows a SAME-host redirect and succeeds", async () => {
@@ -412,7 +496,7 @@ describe("fetchCimdClient — SSRF protection", () => {
   it("propagates a fetch failure (non-2xx, non-redirect) as a ClientRegistrationError", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 }));
     await expect(fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost })).rejects.toThrow(
-      ClientRegistrationError,
+      /fetch failed with status 500/,
     );
   });
 });
@@ -594,8 +678,12 @@ describe("fetchCimdClient — every network-layer failure is one indistinguishab
     expect((error?.cause as Error | undefined)?.message).toContain("ENOTFOUND");
   });
 
-  // The control: a deliberate refusal keeps its own message, so the wrap did not flatten the
-  // taxonomy it was meant to complete.
+  // NOT a control on the wrap — fix round 2 corrected that claim in the report and fix round 3
+  // corrects it here, where it was still standing (NEW-8). This refusal is raised in
+  // `assertPublicHttpsUrl`, OUTSIDE all three wrapped call sites, so it never reaches
+  // `asCimdFetchFailure` at all. What it does pin is narrower and still worth having: a refusal
+  // this module decided on keeps its own message rather than the uniform network one. The
+  // passthrough branch itself is pinned by the 64 KB cap's message, above.
   it("leaves a deliberate ClientRegistrationError (the private-address refusal) untouched", async () => {
     await expect(
       fetchCimdClient("https://internal.example.com/id", {
@@ -691,15 +779,15 @@ describe("parseDcrRegistrationRequestBody", () => {
   });
 
   it("rejects a form-encoded body", () => {
-    expect(() => parseDcrRegistrationRequestBody("redirect_uris=https%3A%2F%2Fapp.example.com%2Fcb")).toThrow(ClientRegistrationError);
+    expect(() => parseDcrRegistrationRequestBody("redirect_uris=https%3A%2F%2Fapp.example.com%2Fcb")).toThrow(/registration request body is not valid JSON/);
   });
 
   it("rejects a body with no redirect_uris", () => {
-    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({}))).toThrow(ClientRegistrationError);
+    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({}))).toThrow(/failed validation/);
   });
 
   it("rejects a body whose redirect_uris is an empty array", () => {
-    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: [] }))).toThrow(ClientRegistrationError);
+    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: [] }))).toThrow(/failed validation/);
   });
 
   it.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(

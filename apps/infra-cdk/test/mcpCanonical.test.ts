@@ -101,11 +101,12 @@ const functionIdForRouteKey = (routeKey: string): string => {
   const integration = template.findResources("AWS::ApiGatewayV2::Integration")[integrationRef!.Ref];
   expect(integration, `route ${routeKey} targets an integration that is not in the template`).toBeDefined();
 
-  // `IntegrationUri` comes in two spellings depending on how the integration was constructed —
-  // a bare `Fn::GetAtt` (what the MCP API's integrations emit) or an `Fn::Join` that embeds one
-  // inside the full apigateway ARN (what the existing HTTP and WebSocket APIs emit). Matching one
-  // shape only would silently skip the other API's routes, so recurse and take the function ARN
-  // wherever it sits.
+  // Recurse for the function ARN rather than matching a fixed shape. `IntegrationUri` has two
+  // spellings — a bare `Fn::GetAtt` and an `Fn::Join` embedding one inside the full apigateway ARN
+  // — and which one CDK emits is an implementation detail of the integration construct, not
+  // something this file should encode. (Honest note, re-review Minor I: every call site here
+  // filters to the MCP API, whose integrations all use the bare form, so the join case is
+  // unreached today. It is generality, not a guard against an observed hazard.)
   const functionArnGetAtt = (node: unknown): string | undefined => {
     if (Array.isArray(node)) return node.map(functionArnGetAtt).find((id) => id !== undefined);
     if (typeof node !== "object" || node === null) return undefined;
@@ -128,11 +129,14 @@ const functionIdForRouteKey = (routeKey: string): string => {
 const policyStatementsFor = (roleIdPrefix: RegExp): Array<Record<string, unknown>> => {
   const roleId = Object.keys(template.findResources("AWS::IAM::Role")).find((id) => roleIdPrefix.test(id));
   expect(roleId, `no AWS::IAM::Role with a logical id matching ${roleIdPrefix}`).toBeDefined();
-  const policy = Object.values(template.findResources("AWS::IAM::Policy")).find((p) =>
+  // EVERY policy attached to the role, not the first one found (re-review, Minor J): CDK emits one
+  // inline policy per role today, but a second would silently fall outside a `.find()` and any
+  // "this function cannot reach X" assertion built on it would go quietly blind.
+  const policies = Object.values(template.findResources("AWS::IAM::Policy")).filter((p) =>
     (p.Properties.Roles as Array<{ Ref?: string }>).some((r) => r.Ref === roleId),
   );
-  expect(policy, `no AWS::IAM::Policy attached to ${roleId}`).toBeDefined();
-  return (policy!.Properties.PolicyDocument as { Statement: Array<Record<string, unknown>> }).Statement;
+  expect(policies.length, `no AWS::IAM::Policy attached to ${roleId}`).toBeGreaterThan(0);
+  return policies.flatMap((p) => (p.Properties.PolicyDocument as { Statement: Array<Record<string, unknown>> }).Statement);
 };
 
 // Does any statement in `statements` reach `resourceLogicalId`, by Ref or by Fn::GetAtt? Compared
@@ -303,6 +307,136 @@ describe("who is wired to whom (the relationships a property assertion cannot se
     expect(cors, "the MCP API has no CORS configuration").toBeDefined();
     expect(cors!.AllowHeaders).toContain("authorization");
     expect(cors!.AllowHeaders).toContain("*");
+  });
+});
+
+describe("what the first fix round's own falsification set did not test", () => {
+  // -------------------------------------------------------------------------------------------
+  // Re-review of fix round 1. My own falsification set tested the ten mutations my new assertions
+  // caught, which is the shape a self-graded check always takes: the review's table had TWELVE
+  // rows and four were never converted into mutations at all (#4 allowOrigins narrowed, #5
+  // exposeHeaders dropped, #8 COGNITO_DOMAIN pointed at the canonical URI, #12 the table set to
+  // RETAIN) — all four still passed. The rest of this block closes those, plus five more
+  // survivors the re-review found by mutating past my list.
+  // -------------------------------------------------------------------------------------------
+
+  it("CORS is asserted in FULL — every field, because each one alone breaks a browser client", () => {
+    const apiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-mcp-beta");
+    const cors = template.findResources("AWS::ApiGatewayV2::Api")[apiId].Properties.CorsConfiguration as {
+      AllowOrigins?: string[];
+      AllowMethods?: string[];
+      AllowHeaders?: string[];
+      ExposeHeaders?: string[];
+      MaxAge?: number;
+    };
+    expect(cors, "the MCP API has no CORS configuration").toBeDefined();
+    // Narrowed to the web's own origin (review row #4) every browser-hosted client 403s: they are
+    // hosted anywhere, which is the entire point of the client class spec §7 serves.
+    expect(cors.AllowOrigins).toEqual(["*"]);
+    expect(cors.AllowMethods).toEqual(expect.arrayContaining(["GET", "POST"]));
+    expect(cors.AllowHeaders).toEqual(expect.arrayContaining(["*", "authorization"]));
+    // Dropped (review row #5), the 401's WWW-Authenticate is unreadable from a browser — and that
+    // header IS the discovery entry point, so the client has nowhere to go and no way to say why.
+    expect(cors.ExposeHeaders).toEqual(expect.arrayContaining(["WWW-Authenticate"]));
+    expect(cors.MaxAge, "no max-age means a preflight before nearly every tool call").toBeGreaterThan(0);
+  });
+
+  it("every environment value is pinned to the RESOURCE it must name, not merely present", () => {
+    // Review row #8 and re-review Important C: asserting a KEY exists catches a deletion and
+    // nothing else. Each of these swaps deploys clean and fails at a different distance — the
+    // Cognito domain sends the golfer's browser to a host that does not exist, and the table swap
+    // points the authorization server at a table it has no grant on.
+    const oauthTableId = findLogicalId("AWS::DynamoDB::Table", (p) => p.TableName === "swng-mcp-oauth-beta");
+    const coreTableId = findLogicalId("AWS::DynamoDB::Table", (p) => String(p.TableName).includes("core"));
+    const authEnv = environmentOf(/^McpAuthFunction/);
+
+    expect(authEnv.TABLE_MCP_OAUTH).toEqual({ Ref: oauthTableId });
+    expect(environmentOf(/^McpFunction/).TABLE_CORE).toEqual({ Ref: coreTableId });
+
+    // The hosted-UI origin, never the canonical URI — they are both "a URL we hold in a constant"
+    // and nothing but this assertion tells them apart.
+    expect(JSON.stringify(authEnv.COGNITO_DOMAIN)).toContain("amazoncognito.com");
+    expect(JSON.stringify(authEnv.COGNITO_DOMAIN)).not.toContain(MCP_HOST);
+  });
+
+  it("mcp keeps the grants its tool surface actually needs", () => {
+    // Re-review Important B: every grant assertion so far was NEGATIVE ("mcp cannot reach the
+    // OAuth store"), so deleting a grant mcp DOES need passed. Each of these kills a tool call on
+    // its first invocation, in the account, with a green suite.
+    const statements = policyStatementsFor(/^McpFunctionServiceRole/);
+    const tokenSecretId = findLogicalId("AWS::SecretsManager::Secret", (p) => p.Name === "swng-token-secret-beta");
+    expect(grants(statements, "secretsmanager:", tokenSecretId), "mcp cannot read the token secret").toBe(true);
+    for (const table of ["rounds", "core", "snapshots", "projections", "connections"]) {
+      const id = findLogicalId("AWS::DynamoDB::Table", (p) => String(p.TableName).includes(table));
+      expect(grants(statements, "dynamodb:", id), `mcp cannot reach the ${table} table`).toBe(true);
+    }
+    expect(
+      statements.some((st) => JSON.stringify(st.Action).includes("execute-api:ManageConnections")),
+      "mcp cannot broadcast a score write to the crew's open sockets",
+    ).toBe(true);
+  });
+
+  it("neither MCP function holds a wildcard resource", () => {
+    // Re-review Minor F: `grants()` matches by logical id, so a `Resource: "*"` statement would
+    // hand mcp the OAuth table's live codes and held tokens while BOTH "mcp cannot touch it"
+    // assertions above still passed. Least privilege has to be asserted directly.
+    for (const prefix of [/^McpFunctionServiceRole/, /^McpAuthFunctionServiceRole/]) {
+      for (const statement of policyStatementsFor(prefix)) {
+        expect(statement.Resource, `a wildcard resource on ${prefix}`).not.toBe("*");
+      }
+    }
+  });
+
+  it("the MCP host resolves to the MCP API's own domain, never the web distribution", () => {
+    // Re-review Important D: the stack builds this record eleven lines below the web's, and a
+    // verbatim copy-paste points mcp.beta.swng.golf at the CloudFront distribution serving the
+    // SPA. DNS resolves, TLS terminates, and every MCP request gets the web app's index.html.
+    const record = Object.values(template.findResources("AWS::Route53::RecordSet")).find((r) => r.Properties.Name === `${MCP_HOST}.`);
+    expect(record, `no Route 53 record for ${MCP_HOST}`).toBeDefined();
+    const mcpDomainId = Object.keys(template.findResources("AWS::ApiGatewayV2::DomainName"))[0];
+    expect(JSON.stringify(record!.Properties.AliasTarget)).toContain(mcpDomainId);
+    expect(JSON.stringify(record!.Properties.AliasTarget)).not.toContain("Distribution");
+  });
+
+  it("every MCP alarm actually notifies, including the CIMD one that exists to page on an outage", () => {
+    // Re-review Important E: Addendum H1's whole point is that the uniform 400 hides a total
+    // egress outage, so the alarm is the only thing left that can say so. An alarm with no actions
+    // is a dashboard nobody is looking at.
+    const alarms = Object.entries(template.findResources("AWS::CloudWatch::Alarm")).filter(([id]) => /^Mcp/.test(id));
+    expect(alarms.length, "no MCP alarms at all").toBeGreaterThanOrEqual(3);
+    for (const [id, alarm] of alarms) {
+      expect(alarm.Properties.AlarmActions, `${id} notifies nobody`).toBeDefined();
+      expect((alarm.Properties.AlarmActions as unknown[]).length, `${id} notifies nobody`).toBeGreaterThan(0);
+      expect(alarm.Properties.OKActions, `${id} never says it recovered`).toBeDefined();
+    }
+  });
+
+  it("the OAuth store is DESTROY, so a beta wipe does not strand it", () => {
+    // Review row #12. Low consequence and still true: beta is wiped deliberately and often, and
+    // RETAIN leaves an orphan table holding real authorization codes behind.
+    const tableId = findLogicalId("AWS::DynamoDB::Table", (p) => p.TableName === "swng-mcp-oauth-beta");
+    expect(template.findResources("AWS::DynamoDB::Table")[tableId].DeletionPolicy).toBe("Delete");
+  });
+
+  it("the throttle carries the stack's own numbers, not merely some number", () => {
+    // Re-review Minor G: `expect.any(Number)` accepts a 1-request-per-second ceiling, which is a
+    // self-inflicted outage that passes as "throttled".
+    const apiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-mcp-beta");
+    const httpApiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-http-beta");
+    const settingsFor = (id: string): unknown =>
+      Object.values(template.findResources("AWS::ApiGatewayV2::Stage")).find((st) => (st.Properties.ApiId as { Ref?: string })?.Ref === id)
+        ?.Properties.DefaultRouteSettings;
+    // Pinned against the EXISTING API's stage rather than a literal: they read the same two
+    // constants, so this fails if the MCP stage drifts from them without hardcoding either.
+    expect(settingsFor(apiId)).toEqual(settingsFor(httpApiId));
+  });
+
+  it("the MCP app client declares its auth flows rather than inheriting Cognito's default", () => {
+    // Re-review Minor H: the line that fixed this in the previous round had no test and reverted
+    // invisibly. Refresh is the only flow this client should offer; the authorization-code flow is
+    // governed by AllowedOAuthFlows, not by this list.
+    const clientId = findLogicalId("AWS::Cognito::UserPoolClient", (p) => String(p.ClientName ?? "").includes("mcp"));
+    expect(template.findResources("AWS::Cognito::UserPoolClient")[clientId].Properties.ExplicitAuthFlows).toEqual(["ALLOW_REFRESH_TOKEN_AUTH"]);
   });
 });
 

@@ -1530,6 +1530,11 @@ export class SwngStack extends Stack {
           // credentials, and naming the one header that matters is the same discipline as the
           // route table above.
           exposeHeaders: ["WWW-Authenticate"],
+          // Without this the browser re-preflights before nearly every tool call — an extra
+          // round trip against the 10 s budget spec §3.4 gives the whole exchange, paid on every
+          // call rather than once (re-review, Minor K). Ten minutes is the ceiling Chromium
+          // honours; Firefox caps lower and simply caches for less.
+          maxAge: Duration.minutes(10),
         },
         defaultDomainMapping: { domainName: mcpDomainName },
       });

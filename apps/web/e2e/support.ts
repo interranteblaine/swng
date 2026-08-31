@@ -97,6 +97,11 @@ export interface WebEnv {
   // source, no drift" rationale as this function's own doc comment already gives httpUrl/wsUrl.
   readonly userPoolId: string;
   readonly userPoolClientId: string;
+  // The pool's hosted-login origin, also already written by scripts/webEnv.mjs from the same
+  // cdk-outputs.json read. mcpConnector.spec.ts needs it for two things a fake cannot give:
+  // driving the REAL managed-login form (resource binding is managed-login-only, design spec
+  // §4.2 F3), and recognising the second, silent Cognito hop the write consent triggers.
+  readonly hostedUiDomain: string;
 }
 
 // Reads the SAME apps/web/.env.local playwright.config.ts's webServer.command generates
@@ -114,7 +119,38 @@ export const loadWebEnv = (): WebEnv => {
     if (!line) throw new Error(`${key} not found in ${envPath} — did scripts/webEnv.mjs run (playwright.config.ts's webServer.command)?`);
     return line.slice(key.length + 1).trim();
   };
-  return { httpUrl: read("VITE_HTTP_URL"), wsUrl: read("VITE_WS_URL"), userPoolId: read("VITE_USER_POOL_ID"), userPoolClientId: read("VITE_USER_POOL_CLIENT_ID") };
+  return {
+    httpUrl: read("VITE_HTTP_URL"),
+    wsUrl: read("VITE_WS_URL"),
+    userPoolId: read("VITE_USER_POOL_ID"),
+    userPoolClientId: read("VITE_USER_POOL_CLIENT_ID"),
+    hostedUiDomain: read("VITE_HOSTED_UI_DOMAIN"),
+  };
+};
+
+// The canonical MCP resource URI — `https://mcp.beta.swng.golf/mcp` on beta (design spec §4.3:
+// ONE string that is simultaneously the MCP endpoint URL, the Cognito resource server
+// identifier, and the RFC 9728 PRM `resource`).
+//
+// Read straight from apps/infra-cdk/cdk-outputs.json rather than from .env.local, because
+// unlike httpUrl/wsUrl this value is deliberately NOT compiled into the web bundle — nothing in
+// apps/web/src speaks MCP, so scripts/webEnv.mjs has no reason to emit it and adding a VITE_*
+// var the app never reads would be worse than a second read of the file the script itself reads.
+// This is the SAME `McpUrl` output swngStack.ts emits from the same `canonical` local it hands
+// the mcp function as MCP_RESOURCE, so mcpConnector.spec.ts comparing the served metadata to
+// this value is an end-to-end check that the deployed lambda's environment still agrees with the
+// deployed domain name.
+export const loadMcpResource = (): string => {
+  const outputsPath = fileURLToPath(new URL("../../infra-cdk/cdk-outputs.json", import.meta.url));
+  const outputs: unknown = JSON.parse(readFileSync(outputsPath, "utf8"));
+  // Narrowed, never cast (CLAUDE.md: parse stored data). cdk-outputs.json is one entry keyed by
+  // stack name — the same "take the first (only) stack" read scripts/webEnv.mjs performs.
+  const stack: unknown = outputs !== null && typeof outputs === "object" ? Object.values(outputs)[0] : undefined;
+  const mcpUrl: unknown = stack !== null && typeof stack === "object" && "McpUrl" in stack ? stack.McpUrl : undefined;
+  if (typeof mcpUrl !== "string" || mcpUrl.length === 0) {
+    throw new Error(`no McpUrl output in ${outputsPath} — deploy the MCP stack (pnpm deploy:beta) before running this gate`);
+  }
+  return mcpUrl;
 };
 
 // --- Course seeding: search-first, create-if-absent, via the PUBLIC course API ---------------
@@ -558,12 +594,24 @@ const trackMintedUser = (userPoolId: string, username: string): void => {
   appendFileSync(MINTED_USERS_FILE, `${JSON.stringify({ userPoolId, username })}\n`);
 };
 
+// The username/password a throwaway user was minted WITH, alongside the tokens InitiateAuth
+// returned for it. mcpConnector.spec.ts is the one caller that needs the raw credential pair:
+// Cognito resource binding (`resource=`) is managed-login-only, so an MCP access token can only
+// be obtained by TYPING these into the hosted login form in a browser — the InitiateAuth
+// shortcut below cannot mint one at all (design spec §4.2/§8). Every other spec wants only the
+// tokens, which is what mintThrowawayUser still returns.
+export interface ThrowawayCredentials {
+  readonly username: string;
+  readonly password: string;
+  readonly tokens: AuthTokens;
+}
+
 // Mints a per-run throwaway Cognito user via the admin APIs (AdminCreateUser +
 // AdminSetUserPassword, MessageAction SUPPRESS so no real email ever sends) and exchanges it
 // for real tokens via InitiateAuth USER_PASSWORD_AUTH — the same beta-grade flow
 // authConfig.ts's own doc comment names this exact purpose for (never drives the Hosted UI).
-// Returns the SAME shape tokenStore.ts persists, ready to inject verbatim.
-export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
+// `tokens` is the SAME shape tokenStore.ts persists, ready to inject verbatim.
+export const mintThrowawayCredentials = async (label: string): Promise<ThrowawayCredentials> => {
   const { userPoolId, userPoolClientId } = loadWebEnv();
   const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
   const username = `e2e-${label}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}@example.com`;
@@ -597,8 +645,12 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
   if (!result?.IdToken || !result.RefreshToken || result.ExpiresIn === undefined) {
     throw new Error(`InitiateAuth for ${username} did not return a complete AuthenticationResult: ${JSON.stringify(auth)}`);
   }
-  return { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 };
+  return { username, password, tokens: { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 } };
 };
+
+// The tokens-only view every pre-MCP spec already calls. Kept as the name those specs import,
+// so widening the mint to also hand back its own username/password stayed a pure addition.
+export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => (await mintThrowawayCredentials(label)).tokens;
 
 // A signed-in account bound to its own golfer record — the ONE identity shape every *Direct
 // round call above takes (accounts-only identity spec §1-2: every person on a card is an

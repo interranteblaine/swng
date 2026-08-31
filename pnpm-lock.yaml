@@ -190,6 +190,9 @@ importers:
       '@aws-sdk/client-lambda':
         specifier: 'catalog:'
         version: 3.1085.0
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.61.1

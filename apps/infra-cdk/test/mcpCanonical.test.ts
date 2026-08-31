@@ -69,6 +69,81 @@ const mcpRouteKeys = (): string[] => {
     .map((route) => route.Properties.RouteKey as string);
 };
 
+// ---------------------------------------------------------------------------------------------
+// WIRING, not properties (fix round 1, Important 3).
+//
+// Every assertion above this line reads ONE resource's properties. That is blind to the thing a
+// CloudFormation template mostly IS — which resource points at which. Twelve mutations, each
+// verified to change the synthesized template, passed all 26 of this file's original assertions:
+// both IAM grants moved onto the other function, the whole CORS block deleted, both
+// MCP_CLIENT_IDs pointed at the WEB app client, `POST /mcp` integrated to mcpAuth, all eight
+// OAuth routes integrated to mcp, and the stage throttle removed. Every one of those deploys
+// clean and is wrong in the account.
+//
+// The helpers below walk the references the template actually encodes, so a test can name the
+// relationship instead of the property.
+// ---------------------------------------------------------------------------------------------
+
+// A route key -> the logical id of the Lambda it really invokes. Two hops, because that is how
+// CloudFormation spells it: the route's `Target` names an integration by Ref, and the
+// integration's `IntegrationUri` embeds an `Fn::GetAtt` on the function.
+const functionIdForRouteKey = (routeKey: string): string => {
+  const apiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-mcp-beta");
+  const route = Object.values(template.findResources("AWS::ApiGatewayV2::Route")).find(
+    (r) => (r.Properties.ApiId as { Ref?: string } | undefined)?.Ref === apiId && r.Properties.RouteKey === routeKey,
+  );
+  expect(route, `no route on the MCP API with key ${routeKey}`).toBeDefined();
+
+  const target = route!.Properties.Target as { "Fn::Join": [string, unknown[]] };
+  const integrationRef = target["Fn::Join"][1].find((part): part is { Ref: string } => typeof part === "object" && part !== null && "Ref" in part);
+  expect(integrationRef, `route ${routeKey} does not target an integration by Ref`).toBeDefined();
+
+  const integration = template.findResources("AWS::ApiGatewayV2::Integration")[integrationRef!.Ref];
+  expect(integration, `route ${routeKey} targets an integration that is not in the template`).toBeDefined();
+
+  // `IntegrationUri` comes in two spellings depending on how the integration was constructed —
+  // a bare `Fn::GetAtt` (what the MCP API's integrations emit) or an `Fn::Join` that embeds one
+  // inside the full apigateway ARN (what the existing HTTP and WebSocket APIs emit). Matching one
+  // shape only would silently skip the other API's routes, so recurse and take the function ARN
+  // wherever it sits.
+  const functionArnGetAtt = (node: unknown): string | undefined => {
+    if (Array.isArray(node)) return node.map(functionArnGetAtt).find((id) => id !== undefined);
+    if (typeof node !== "object" || node === null) return undefined;
+    const entries = Object.entries(node as Record<string, unknown>);
+    for (const [key, value] of entries) {
+      if (key === "Fn::GetAtt" && Array.isArray(value) && value[1] === "Arn" && typeof value[0] === "string") return value[0];
+      const nested = functionArnGetAtt(value);
+      if (nested !== undefined) return nested;
+    }
+    return undefined;
+  };
+  const functionId = functionArnGetAtt(integration.Properties.IntegrationUri);
+  expect(functionId, `the integration for ${routeKey} does not invoke a function by Fn::GetAtt`).toBeDefined();
+  expect(template.findResources("AWS::Lambda::Function")[functionId!], `${routeKey} points at ${functionId}, which is not a Lambda function`).toBeDefined();
+  return functionId!;
+};
+
+// The inline policy attached to ONE function's role — found through the role's own logical id
+// rather than the policy's, so this never hardcodes one of CDK's hashes.
+const policyStatementsFor = (roleIdPrefix: RegExp): Array<Record<string, unknown>> => {
+  const roleId = Object.keys(template.findResources("AWS::IAM::Role")).find((id) => roleIdPrefix.test(id));
+  expect(roleId, `no AWS::IAM::Role with a logical id matching ${roleIdPrefix}`).toBeDefined();
+  const policy = Object.values(template.findResources("AWS::IAM::Policy")).find((p) =>
+    (p.Properties.Roles as Array<{ Ref?: string }>).some((r) => r.Ref === roleId),
+  );
+  expect(policy, `no AWS::IAM::Policy attached to ${roleId}`).toBeDefined();
+  return (policy!.Properties.PolicyDocument as { Statement: Array<Record<string, unknown>> }).Statement;
+};
+
+// Does any statement in `statements` reach `resourceLogicalId`, by Ref or by Fn::GetAtt? Compared
+// against the serialized statement so both spellings and any nesting are covered.
+const grants = (statements: Array<Record<string, unknown>>, actionPrefix: string, resourceLogicalId: string): boolean =>
+  statements.some((statement) => {
+    const actions = Array.isArray(statement.Action) ? (statement.Action as string[]) : [String(statement.Action)];
+    if (!actions.some((action) => action.startsWith(actionPrefix))) return false;
+    return JSON.stringify(statement.Resource).includes(`"${resourceLogicalId}"`);
+  });
+
 describe("the MCP canonical URI, read off the synthesized template", () => {
   it("the Cognito resource server identifier IS the MCP endpoint URL", () => {
     // Measured, spec F2: a `resource` that doesn't name a registered resource server yields an
@@ -127,7 +202,7 @@ describe("the MCP canonical URI, read off the synthesized template", () => {
 });
 
 describe("the MCP API's routes", () => {
-  // Nine explicit route keys and no catch-all. mcpAuth dispatches on the NORMALIZED pathname, so
+  // Ten explicit route keys and no catch-all. mcpAuth dispatches on the NORMALIZED pathname, so
   // `POST /authorize/../token` reaches handleToken; explicit route keys make that unreachable at
   // the gateway. `ANY /{proxy+}` would hand every traversal-shaped path straight to the switch.
   const EXPECTED = [
@@ -135,6 +210,13 @@ describe("the MCP API's routes", () => {
     "GET /.well-known/oauth-protected-resource",
     "GET /.well-known/oauth-protected-resource/mcp",
     "GET /authorize",
+    // Fix round 1, Important 2: 405 is a SPECIFIED signal at this one path. The SDK's
+    // `legacy: "stateless"` leg answers GET with 405 to say "no SSE stream here", and
+    // @modelcontextprotocol/client returns cleanly on exactly that status and throws on anything
+    // else. Unrouted, the gateway's own 404 arrives instead and every 2025-era connection carries
+    // a transport error. The three OAuth endpoints stay method-pinned: nothing in OAuth gives a
+    // wrong-verb 405 any protocol meaning.
+    "GET /mcp",
     "GET /oauth/callback",
     "POST /mcp",
     "POST /oauth/consent",
@@ -142,16 +224,85 @@ describe("the MCP API's routes", () => {
     "POST /token",
   ];
 
-  it("declares exactly the nine surfaces, explicitly", () => {
+  it("declares exactly the ten surfaces, explicitly", () => {
     expect([...mcpRouteKeys()].sort()).toEqual(EXPECTED);
   });
 
   it("has no catch-all and no ANY-method route", () => {
+    // Fix round 1, Minor 7: a for-loop over an empty list asserts nothing and passes. Pin the
+    // count first, so "no catch-all" can never be satisfied by "no routes at all".
+    expect(mcpRouteKeys()).toHaveLength(EXPECTED.length);
     for (const key of mcpRouteKeys()) {
       expect(key).not.toContain("{proxy+}");
       expect(key).not.toContain("$default");
       expect(key.startsWith("ANY ")).toBe(false);
     }
+  });
+});
+
+describe("who is wired to whom (the relationships a property assertion cannot see)", () => {
+  const mcpOAuthTableId = (): string => findLogicalId("AWS::DynamoDB::Table", (p) => p.TableName === "swng-mcp-oauth-beta");
+  const mcpClientSecretId = (): string => findLogicalId("AWS::SecretsManager::Secret", (p) => p.Name === "swng-mcp-client-secret-beta");
+  const mcpAppClientId = (): string => findLogicalId("AWS::Cognito::UserPoolClient", (p) => String(p.ClientName ?? "").includes("mcp"));
+
+  it("the canonical path is served by the mcp function, on BOTH its methods", () => {
+    expect(functionIdForRouteKey("POST /mcp")).toMatch(/^McpFunction/);
+    expect(functionIdForRouteKey("GET /mcp")).toMatch(/^McpFunction/);
+  });
+
+  it("every one of the eight OAuth surfaces is served by mcpAuth, not by mcp", () => {
+    // Integrated to the wrong function these all still deploy: the routes exist, the methods are
+    // right, and every request reaches a handler that has never heard of the path.
+    // Compare the path EXACTLY: `/.well-known/oauth-protected-resource/mcp` also ends with the
+    // canonical pathname, so an `endsWith` filter silently drops a route from the check.
+    const canonicalPath = new URL(CANONICAL).pathname;
+    const oauthKeys = mcpRouteKeys().filter((key) => key.slice(key.indexOf(" ") + 1) !== canonicalPath);
+    expect(oauthKeys).toHaveLength(8);
+    for (const key of oauthKeys) {
+      expect(functionIdForRouteKey(key), `${key} is not served by mcpAuth`).toMatch(/^McpAuthFunction/);
+    }
+  });
+
+  it("the OAuth mediation table is mcpAuth's alone — mcp cannot touch it", () => {
+    const tableId = mcpOAuthTableId();
+    expect(grants(policyStatementsFor(/^McpAuthFunctionServiceRole/), "dynamodb:", tableId)).toBe(true);
+    expect(grants(policyStatementsFor(/^McpFunctionServiceRole/), "dynamodb:", tableId)).toBe(false);
+  });
+
+  it("the app-client secret is mcpAuth's alone — mcp cannot read it", () => {
+    // mcp legitimately reads a DIFFERENT secret (the composition root's token secret), so an
+    // assertion that merely counted secretsmanager statements would pass on the swap.
+    const secretId = mcpClientSecretId();
+    expect(grants(policyStatementsFor(/^McpAuthFunctionServiceRole/), "secretsmanager:", secretId)).toBe(true);
+    expect(grants(policyStatementsFor(/^McpFunctionServiceRole/), "secretsmanager:", secretId)).toBe(false);
+  });
+
+  it("both functions are told the MCP app client, never the web one", () => {
+    // Pointed at the web client this deploys clean and then fails at the far end of a browser
+    // sign-in: the web client has no custom scopes and issues no resource-bound token, so
+    // /authorize's Cognito leg refuses and the verifier would reject anything that did come back.
+    const clientId = mcpAppClientId();
+    for (const prefix of [/^McpFunction/, /^McpAuthFunction/]) {
+      expect(environmentOf(prefix).MCP_CLIENT_ID).toEqual({ Ref: clientId });
+    }
+  });
+
+  it("the MCP API's own stage carries the throttle, and CORS admits the one header every call sends", () => {
+    const apiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-mcp-beta");
+    const stage = Object.values(template.findResources("AWS::ApiGatewayV2::Stage")).find(
+      (s) => (s.Properties.ApiId as { Ref?: string } | undefined)?.Ref === apiId,
+    );
+    expect(stage, "the MCP API has no stage of its own").toBeDefined();
+    expect(stage!.Properties.DefaultRouteSettings).toMatchObject({ ThrottlingBurstLimit: expect.any(Number), ThrottlingRateLimit: expect.any(Number) });
+
+    // `*` does not cover Authorization — the Fetch Standard defines it as a CORS non-wildcard
+    // request-header name precisely to exclude it. Deleting the CORS block entirely, or trimming
+    // it back to ["*"], deploys clean and breaks every browser-hosted client on every
+    // authenticated call.
+    const cors = template.findResources("AWS::ApiGatewayV2::Api")[apiId].Properties.CorsConfiguration as { AllowHeaders?: string[] } | undefined;
+    expect(cors, "the MCP API has no CORS configuration").toBeDefined();
+    expect(cors!.AllowHeaders).toContain("authorization");
+    expect(cors!.AllowHeaders).toContain("*");
   });
 });
 
@@ -268,11 +419,20 @@ describe("observability the MCP surfaces would otherwise lack", () => {
 // ---------------------------------------------------------------------------------------------
 // Parity with the code that actually SERVES these paths.
 //
-// A CDK synth cannot import @swng/lambda: `cdk deploy` runs bin/infra-cdk.ts through ts-node with
-// no build step, so a stack-level import would resolve to whatever `packages/lambda/dist` last
-// held — or nothing. So the stack declares its own literals and THIS pins them, exactly as
-// routesParity.test.ts already pins HTTP_ROUTES against buildRoutes. Infra depends on lambda; the
-// arrow points the right way, and the guard lives on this side of it.
+// WHY THE STACK RETYPES THESE RATHER THAN IMPORTING THEM (corrected in fix round 1, Minor 1 —
+// the original claim here, that a synth CANNOT import a workspace package, was simply false:
+// swngStack.ts already imports @swng/brand at synth time). The real reasons are narrower and
+// still hold: importing @swng/lambda's barrel would drag the composition root, every adapter and
+// the AWS SDK into the synth process to read a few strings; and `cdk deploy` runs bin/infra-cdk.ts
+// with no build step, so that import would put a LOAD-BEARING value — the callback URL Cognito
+// matches exactly — behind a possibly-stale `dist`. A stale brand colour is cosmetic; a stale
+// callback path strands a signed-in golfer on a 404. So the stack declares its own literals and
+// THIS pins them, exactly as routesParity.test.ts already pins HTTP_ROUTES against buildRoutes.
+//
+// WHAT THIS GUARD ACTUALLY REACHES (fix round 1, Minor 2): the imports above resolve to
+// @swng/lambda's BUILT `dist`, so a rename in its source reddens these tests only after that
+// package is rebuilt. `pnpm validate` builds before it tests, so the gate genuinely holds where it
+// counts — but `vitest` alone, run against a stale `dist`, will not see the drift.
 //
 // This is the third time in this arc that a literal typed in two places with nothing coupling
 // them turned out to be a defect (redirect_uri's two caps, the metadata/router endpoint paths).

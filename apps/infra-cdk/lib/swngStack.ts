@@ -243,10 +243,20 @@ export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod;
 // reaching the dispatcher at all.
 //
 // These paths are the SAME STRINGS packages/lambda/src/oauth/paths.ts serves and metadata.ts
-// advertises. Nothing in a CDK synth can import them (see test/mcpCanonical.test.ts's own note),
-// so the coupling is a parity test — the identical mechanism routesParity.test.ts already
-// provides for HTTP_ROUTES, and the one this arc has now had to install three times for retyped
-// literals. A comment is not a mechanism.
+// advertises, retyped here and coupled by a parity test (test/mcpCanonical.test.ts) rather than
+// imported — the identical mechanism routesParity.test.ts already provides for HTTP_ROUTES, and
+// the one this arc has now had to install three times for retyped literals. A comment is not a
+// mechanism.
+//
+// WHY NOT IMPORT THEM (corrected in fix round 1, Minor 1 — the original claim here, that a synth
+// CANNOT import a workspace package, was simply false: this file already imports @swng/brand
+// through ./managedLoginBranding.js, and `pnpm deploy:beta` is a bare `cdk deploy` with no build
+// step, so that import already resolves to a gitignored dist). The real reason is narrower and
+// still holds: importing @swng/lambda's barrel would drag the whole composition root, every
+// adapter and the AWS SDK into the synth process to read a few strings, and it would put a
+// LOAD-BEARING value — the callback URL Cognito matches exactly — behind a possibly-stale dist. A
+// stale brand colour is a cosmetic defect; a stale callback path strands a signed-in golfer on a
+// 404. The parity test costs neither.
 
 /** The canonical resource's own path. `https://<mcp host>/mcp` is simultaneously the MCP endpoint
  *  URL, the Cognito resource server identifier and the PRM `resource` (spec §4.3, measured F3),
@@ -259,8 +269,24 @@ export const MCP_ENDPOINT_PATH = "/mcp";
 export const MCP_CALLBACK_PATH = "/oauth/callback";
 export const MCP_CONSENT_PATH = "/oauth/consent";
 
-/** The `mcp` function's one route. */
-export const MCP_ROUTE: { readonly method: HttpMethod; readonly path: string } = { method: HttpMethod.POST, path: MCP_ENDPOINT_PATH };
+/** The `mcp` function's two routes — both on the canonical path.
+ *
+ *  POST is the endpoint itself. GET is here because 405 is a SPECIFIED SIGNAL at this one path,
+ *  not a generic wrong-verb answer (fix round 1, Important 2): the SDK's `legacy: "stateless"` leg
+ *  answers GET with `405 Method not allowed.` to say "no SSE stream here", and
+ *  `@modelcontextprotocol/client` special-cases exactly that status — `_startOrAuthSse` returns
+ *  cleanly on 405 and throws `SdkHttpError` (firing `onerror`) on anything else. Every 2025-era
+ *  connection opens that GET right after `initialized`, and spec §2 says Claude speaks 2025-era
+ *  MCP today. Routed POST-only, the gateway's own `{"message":"Not Found"}` would arrive instead
+ *  and every single connection would carry a transport error. Still an explicit key, still no
+ *  catch-all: this only lets the handler's own answer be the answer.
+ *
+ *  The three OAuth endpoints below stay method-pinned, because nothing in OAuth gives a
+ *  wrong-verb 405 any protocol meaning — that trade is only wrong where the status is a signal. */
+export const MCP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
+  { method: HttpMethod.POST, path: MCP_ENDPOINT_PATH },
+  { method: HttpMethod.GET, path: MCP_ENDPOINT_PATH },
+];
 
 /** The eight surfaces `entries/mcpAuth.ts` routes (its own path switch, plus the resource-suffixed
  *  protected-resource document RFC 9728 §3.1 requires). */
@@ -1408,6 +1434,22 @@ export class SwngStack extends Stack {
       // in the Lambda's environment; the function fetches the value itself at runtime under an
       // audited GetSecretValue grant.
       const cfnMcpUserPoolClient = mcpUserPoolClient.node.defaultChild as CfnUserPoolClient;
+      // DECLARED, not inherited (fix round 1, Minor 3). With no `authFlows` prop CDK omits
+      // ExplicitAuthFlows entirely and Cognito applies its own default set
+      // (REFRESH_TOKEN/USER_SRP/CUSTOM) — not exploitable here (SRP on a confidential client needs
+      // the secret, and a token minted outside the resource-bound managed-login flow carries no
+      // `aud`, which the verifier rejects), but the refresh grant the whole mediation design rests
+      // on should not rest on an implicit AWS default. ALLOW_REFRESH_TOKEN_AUTH alone: the
+      // authorization-code flow is governed by AllowedOAuthFlows above, not by this list, so
+      // nothing else belongs here. The L1 escape hatch, the same idiom used for the web client's
+      // callback URLs below (the L2 has no way to express refresh-only).
+      cfnMcpUserPoolClient.explicitAuthFlows = ["ALLOW_REFRESH_TOKEN_AUTH"];
+      // Fix round 1, Minor 4: the same prod-only anti-enumeration knob the web client carries.
+      // Beta passes nothing, so no property renders and beta stays byte-identical; without this
+      // line, the day prod gets an `mcp` config its managed-login sign-in would enumerate users
+      // while the web's would not. Conditional at the L1 for the same reason the L2 spread is
+      // conditional next door.
+      if (props.preventUserExistenceErrors) cfnMcpUserPoolClient.preventUserExistenceErrors = "ENABLED";
       const mcpClientSecret = new Secret(this, "McpClientSecret", {
         secretName: `swng-mcp-client-secret-${stage}`,
         secretStringValue: SecretValue.resourceAttribute(cfnMcpUserPoolClient.attrClientSecret),
@@ -1471,7 +1513,16 @@ export class SwngStack extends Stack {
         corsPreflight: {
           allowOrigins: ["*"],
           allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST],
-          allowHeaders: ["*"],
+          // `*` AND `authorization`, never `*` alone (fix round 1, Important 1). The Fetch
+          // Standard defines `Authorization` as a CORS NON-WILDCARD request-header name — the
+          // definition exists precisely to exclude it from the wildcard expansion — so a
+          // preflight answering `Access-Control-Allow-Headers: *` does not authorize the one
+          // header every authenticated MCP call carries. AWS's own documented example value for
+          // this field is `authorization, *` for exactly this reason. The wildcard is still
+          // load-bearing: the protocol's `Mcp-Param-*` family is dynamic and cannot be
+          // enumerated. Shipping `*` alone deploys clean and then fails silently, in a browser,
+          // for the one client class spec §7 exists to serve.
+          allowHeaders: ["*", "authorization"],
           // A browser can't READ a response header it wasn't given: the 401's
           // `WWW-Authenticate: Bearer resource_metadata="…"` is the entire discovery entry point
           // (entries/mcp.ts), and without this a browser-hosted client sees a bare 401 and has
@@ -1485,7 +1536,9 @@ export class SwngStack extends Stack {
 
       const mcpIntegration = new HttpLambdaIntegration("McpIntegration", mcpFn);
       const mcpAuthIntegration = new HttpLambdaIntegration("McpAuthIntegration", mcpAuthFn);
-      mcpApi.addRoutes({ path: MCP_ROUTE.path, methods: [MCP_ROUTE.method], integration: mcpIntegration });
+      for (const route of MCP_ROUTES) {
+        mcpApi.addRoutes({ path: route.path, methods: [route.method], integration: mcpIntegration });
+      }
       for (const route of MCP_AUTH_ROUTES) {
         mcpApi.addRoutes({ path: route.path, methods: [route.method], integration: mcpAuthIntegration });
       }

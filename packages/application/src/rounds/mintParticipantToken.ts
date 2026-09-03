@@ -2,11 +2,15 @@ import type { RoundId } from "@swng/domain";
 import type { JoinRoundResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
+import type { Clock } from "../ports/clock.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
+import type { Logger } from "../ports/logger.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
 import { loadRoundState } from "./loadRoundState.js";
+import { writePresence } from "./presence.js";
 
 // POST /rounds/{roundId}/token (architecture-realignment Task 14): scoring capability derives
 // from PARTICIPATION, not the device that joined. A golfer seated in a round's own fold — via
@@ -33,7 +37,7 @@ import { loadRoundState } from "./loadRoundState.js";
 // 5. The joinCode read (spec 2026-07-20 §2), after every authorization check — only a proven
 //    participant can learn whether the round's meta item exists.
 export const mintParticipantToken =
-  (deps: { journal: EventJournal; golferStore: GolferStore; tokens: TokenIssuer; store: RoundStore }) =>
+  (deps: { journal: EventJournal; golferStore: GolferStore; tokens: TokenIssuer; store: RoundStore; projectionStore: ProjectionStore; logger: Logger; clock: Clock }) =>
   async (claims: AccountClaims, id: RoundId): Promise<JoinRoundResponse> => {
     const found = await deps.golferStore.getBySub(claims.sub);
     if (!found) throw new ApplicationError("not-a-participant");
@@ -53,5 +57,24 @@ export const mintParticipantToken =
     if (joinCode === undefined) throw new ApplicationError("round-not-found");
 
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: found.golfer.id });
+
+    // Presence self-heal (2026-09-03 ticket). Seat-time is not the only moment a golfer's
+    // pointer can be established, because seat-time is not reliable: writePresence is
+    // best-effort by design (presence.ts — a discovery nicety must never block play), so a
+    // putLive that throws once used to leave a seated golfer permanently absent from their own
+    // "Your rounds", with nothing anywhere that would ever repair it.
+    //
+    // This is the right place to converge it, and the only one that needs no new authority: the
+    // participation check above was answered by the EVENT LOG (state.participants), the source
+    // of truth — not by the pointer being healed. So re-asserting it here can only ever restate
+    // what the log already says. Every route back into a live round for a device holding no
+    // credential passes through here (web's session/openLiveRound.ts), which makes "get in once,
+    // by any means, and your pointer is rebuilt" the general recovery property.
+    //
+    // Unconditional, not read-then-write: putLive upserts on (golferId, roundId), so writing the
+    // pointer a golfer already has is the same write it already had. Best-effort, same as every
+    // other presence write — never let the home screen's convenience cost this caller the round.
+    await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, found.golfer.id, id, state.card.courseName);
+
     return { roundId: id, token, golferId: found.golfer.id, joinCode };
   };

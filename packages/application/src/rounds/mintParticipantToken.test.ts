@@ -62,11 +62,12 @@ const setup = async () => {
     golferStore,
     tokens,
     course,
+    projectionStore,
     store: mintStore,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
-    mint: mintParticipantToken({ journal, golferStore, tokens, store: mintStore }),
+    mint: mintParticipantToken({ journal, golferStore, tokens, store: mintStore, projectionStore, logger, clock }),
   };
 };
 
@@ -168,6 +169,9 @@ describe("mintParticipantToken — new-device re-mint", () => {
       golferStore: ctx.golferStore,
       tokens: ctx.tokens,
       store: { ...ctx.store, getJoinCode: async () => undefined },
+      projectionStore: ctx.projectionStore,
+      logger: createNullLogger(),
+      clock: createFixedClock(1_000),
     });
 
     await expect(mintNoMeta({ sub: "sub-ann" }, host.roundId)).rejects.toMatchObject({ code: "round-not-found" });
@@ -186,5 +190,82 @@ describe("mintParticipantToken — new-device re-mint", () => {
     // No golfer row is ever created for "sub-nobody" — an unknown roundId would otherwise
     // 404 first if the round were folded before the identity check.
     await expect(ctx.mint({ sub: "sub-nobody" }, roundId("also-never-created"))).rejects.toMatchObject({ code: "not-a-participant" });
+  });
+});
+
+// Presence self-heal (2026-09-03 ticket). writePresence is best-effort by design — a putLive
+// that throws is swallowed and logged so a discovery nicety can never block play
+// (rounds/presence.ts) — and NOTHING used to repair it afterwards, so one failed write left a
+// seated golfer permanently absent from their own "Your rounds". That is the SAME user-visible
+// outcome as the expiring TTL this arc deletes, reached without any timer at all.
+//
+// This use case is the right place to converge it: by the time it issues, it has proven
+// participation from the EVENT LOG itself (state.participants) — the source of truth, not the
+// pointer. So any successful re-entry, by any route, rebuilds the pointer for good.
+describe("mintParticipantToken — presence self-heal", () => {
+  it("rebuilds a MISSING presence pointer for a golfer the log proves is seated", async () => {
+    const ctx = await setup();
+    const annId = golferId("ann-account");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-ann" });
+
+    // Ann is seated, but her pointer is gone — exactly the state a swallowed putLive leaves
+    // behind (and the state prod's TTL sweep left the 2026-09-01 round's creator in).
+    await ctx.projectionStore.deleteLive(annId, host.roundId);
+    expect(await ctx.projectionStore.listLive(annId)).toEqual([]);
+
+    await ctx.mint({ sub: "sub-ann" }, host.roundId);
+
+    expect(await ctx.projectionStore.listLive(annId)).toEqual([
+      { roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) },
+    ]);
+  });
+
+  it("heals only the CALLER's own pointer, never another participant's", async () => {
+    const ctx = await setup();
+    const annId = golferId("ann-account");
+    const boId = golferId("bo-account");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-ann" });
+    await ctx.join({ code: host.joinCode, tee: "white" }, { sub: "sub-bo" });
+
+    await ctx.projectionStore.deleteLive(annId, host.roundId);
+    await ctx.projectionStore.deleteLive(boId, host.roundId);
+
+    await ctx.mint({ sub: "sub-bo" }, host.roundId);
+
+    expect(await ctx.projectionStore.listLive(boId)).toHaveLength(1);
+    expect(await ctx.projectionStore.listLive(annId)).toEqual([]); // Ann's is not the caller's to write
+  });
+
+  // Same binding resolution presence has everywhere else (rounds/presence.ts): a discovery
+  // nicety must never block the thing the caller actually asked for. Getting back INTO the round
+  // is strictly more important than being listed on the home screen.
+  it("a putLive failure does NOT fail the mint — the caller still gets a working token", async () => {
+    const ctx = await setup();
+    const annId = golferId("ann-account");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-ann" });
+
+    const throwingStore = {
+      ...ctx.projectionStore,
+      putLive: async () => {
+        throw new Error("presence table unavailable");
+      },
+    };
+    const mint = mintParticipantToken({
+      journal: ctx.journal,
+      golferStore: ctx.golferStore,
+      tokens: ctx.tokens,
+      store: ctx.store,
+      projectionStore: throwingStore,
+      logger: createNullLogger(),
+      clock: createFixedClock(1_000),
+    });
+
+    const minted = await mint({ sub: "sub-ann" }, host.roundId);
+
+    expect(ctx.tokens.verify(minted.token)).toEqual({ scope: "participant", roundId: host.roundId, golferId: annId });
   });
 });

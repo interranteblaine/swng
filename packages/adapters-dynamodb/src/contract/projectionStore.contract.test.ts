@@ -199,7 +199,7 @@ describe("createDynamoProjectionStore", () => {
       const golfer = golferId(randomUUID());
       const round = roundId(randomUUID());
 
-      await store.putLive(golfer, { roundId: round, courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+      await store.putLive(golfer, { roundId: round, courseName: "Casa Verde GC", joinedAtMs: 1_000 });
 
       expect(await store.listLive(golfer)).toEqual([{ roundId: round, courseName: "Casa Verde GC", joinedAtMs: 1_000 }]);
     });
@@ -217,9 +217,9 @@ describe("createDynamoProjectionStore", () => {
       const roundA2 = roundId(randomUUID());
       const roundB1 = roundId(randomUUID());
 
-      await store.putLive(golferA, { roundId: roundA1, courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
-      await store.putLive(golferA, { roundId: roundA2, courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
-      await store.putLive(golferB, { roundId: roundB1, courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+      await store.putLive(golferA, { roundId: roundA1, courseName: "Casa Verde GC", joinedAtMs: 1_000 });
+      await store.putLive(golferA, { roundId: roundA2, courseName: "Pebble Municipal", joinedAtMs: 2_000 });
+      await store.putLive(golferB, { roundId: roundB1, courseName: "Casa Verde GC", joinedAtMs: 1_000 });
 
       expect(sortByRoundId(await store.listLive(golferA))).toEqual(
         sortByRoundId([
@@ -235,8 +235,8 @@ describe("createDynamoProjectionStore", () => {
       const golfer = golferId(randomUUID());
       const keep = roundId(randomUUID());
       const drop = roundId(randomUUID());
-      await store.putLive(golfer, { roundId: keep, courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
-      await store.putLive(golfer, { roundId: drop, courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
+      await store.putLive(golfer, { roundId: keep, courseName: "Casa Verde GC", joinedAtMs: 1_000 });
+      await store.putLive(golfer, { roundId: drop, courseName: "Pebble Municipal", joinedAtMs: 2_000 });
 
       await store.deleteLive(golfer, drop);
 
@@ -248,20 +248,27 @@ describe("createDynamoProjectionStore", () => {
       await expect(store.deleteLive(golferId(randomUUID()), roundId(randomUUID()))).resolves.toBeUndefined();
     });
 
-    // DynamoDB TTL reads a top-level Number attribute named exactly `ttl` (the projections
-    // table's real TTL spec, apps/infra-cdk/lib/swngStack.ts, realignment Task 1) — this reads
-    // the raw item back via the document client (bypassing the port's own listLive, which
-    // deliberately never surfaces expiresAtSec — ports/projectionStore.ts) to prove putLive
-    // actually writes INTO that attribute, not just tracks expiresAtSec internally.
-    it("putLive writes expiresAtSec into the item's own `ttl` attribute", async () => {
+    // A presence pointer NEVER self-expires (2026-09-03 ticket). It is a golfer's only route
+    // back into a live round they are seated in, and the round's own lifecycle — finalize
+    // (projections/projectArchive.ts) or abandon (rounds/abandonRound.ts) — is the ONLY thing
+    // that removes it. The former 36h TTL was anchored to SEAT time, so a round created for a
+    // tee time further out than that deleted its own creator's way back in before the golf ever
+    // happened: exactly what happened to the round created 72h ahead on 2026-09-01.
+    //
+    // DynamoDB's sweep only ever touches items that CARRY the `ttl` attribute (the projections
+    // table's TTL spec, apps/infra-cdk/lib/swngStack.ts — history lines have always relied on
+    // this), so the guarantee is precisely "the attribute is absent." Read raw via the document
+    // client, bypassing listLive, because absence is invisible through the port.
+    it("putLive writes NO `ttl` attribute — a presence pointer never expires on its own", async () => {
       const store = newStore();
       const golfer = golferId(randomUUID());
       const round = roundId(randomUUID());
 
-      await store.putLive(golfer, { roundId: round, courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 1_234_567_890 });
+      await store.putLive(golfer, { roundId: round, courseName: "Casa Verde GC", joinedAtMs: 1_000 });
 
       const raw = await local.client.send(new GetCommand({ TableName: local.projectionsTable, Key: { pk: `GOLFER#${golfer}`, sk: `LIVE#${round}` } }));
-      expect(raw.Item?.ttl).toBe(1_234_567_890);
+      expect(raw.Item).toBeDefined(); // the row itself was written
+      expect(raw.Item).not.toHaveProperty("ttl");
     });
   });
 

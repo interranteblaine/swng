@@ -255,6 +255,34 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
+  // A failed read is not an empty list (2026-09-03 ticket). "No rounds yet" is a CLAIM about the
+  // server's answer, and rendering it when there was no answer tells a golfer whose round is
+  // very much alive that they are in nothing — the same lie, and the same support ticket, as a
+  // presence pointer that silently vanished. The two states are distinguishable and must read
+  // differently.
+  it("a FAILED live-rounds read says so — never the 'No rounds yet' empty state", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockRejectedValue(new ApiError("network-error", 503));
+
+    renderHome();
+
+    expect(await screen.findByRole("status", { name: /rounds could not be loaded/i })).toBeTruthy();
+    // The empty-state claim is absent — exact string, same disambiguation as the test above.
+    expect(screen.queryByText("No rounds yet")).toBeNull();
+  });
+
+  it("a SUCCESSFUL empty read still says 'No rounds yet' — the two states stay distinguishable", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+
+    renderHome();
+
+    expect(await screen.findByText("No rounds yet")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /rounds could not be loaded/i })).toBeNull();
+  });
+
   it("signed in but no golfer row yet: shows the sign-in CTA, never the device credential list, and never calls GET /me/rounds/live", async () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();

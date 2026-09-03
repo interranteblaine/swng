@@ -353,7 +353,7 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // startRound/joinRound above share. store (spec 2026-07-20 §2): the SAME createDynamoRoundStore
     // instance startRound/joinRound above already share — mint now reads the round's own join
     // code off it too.
-    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store }),
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store, projectionStore, logger, clock }),
     // Course-cards spec §4: createCourse/supersedeCard derive enteredBy from the account
     // (golferStore's own get-or-create), so they take the SAME golferStore startRound/joinRound
     // share; the two reads take only the cardStore.

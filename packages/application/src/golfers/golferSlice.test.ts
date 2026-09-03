@@ -594,8 +594,8 @@ describe("getMyLiveRounds", () => {
     await ctx.journal.append(roundId("r2"), [
       { kind: "round-created", roundId: roundId("r2"), card: fixtureLinks, playedAtMs: 1_500, opId: opId("g2"), hlc: { wallMs: 1_500, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
     ]);
-    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
-    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAtMs: 2_000 });
 
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
     expect(result.rounds).toEqual([
@@ -618,10 +618,10 @@ describe("getMyLiveRounds", () => {
     await ctx.journal.append(roundId("r1"), [
       { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, playedAtMs: 7_777, opId: opId("g1"), hlc: { wallMs: 7_777, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
     ]);
-    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000 });
     // A stale presence pointer whose round never existed / has vanished — journal.read returns
     // [] for it, so playedAt can never resolve.
-    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Ghost Course", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Ghost Course", joinedAtMs: 2_000 });
 
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
     expect(result.rounds).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 7_777 }]);
@@ -639,7 +639,7 @@ describe("getMyLiveRounds", () => {
     await ctx.journal.append(roundId("r1"), [
       { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, playedAtMs: 9_000, opId: opId("g1"), hlc: { wallMs: 500, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
     ]);
-    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000 });
 
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
     expect(result.rounds).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 9_000 }]);

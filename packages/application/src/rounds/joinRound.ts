@@ -44,7 +44,6 @@ export const joinRound =
 
     const { state } = await loadRoundState(deps.journal, id);
     if (state.status === "final") throw new ApplicationError("round-final");
-    findTeeSet(state.card, command.tee); // unknown-tee-set (DomainError) propagates
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
@@ -52,16 +51,37 @@ export const joinRound =
     const golfer: GolferId = golferRecord.id;
 
     // The seat this golfer already holds on this round, if any — either a still-seated re-tap
-    // (rejected immediately below) or a departed seat coming back.
+    // (answered immediately below) or a departed seat coming back.
     const seated = state.participants.find((participant) => participant.golferId === golfer);
 
-    // UX guard: re-tapping join while STILL SEATED is a surprising no-op (the fold's
-    // last-write-wins on golferId would silently rewrite the caller's own seat), so it's rejected
-    // here. A DEPARTED golfer is NOT blocked — rejoining after leaving is just joining again
-    // (spec §4), and the fold clears `departed` on the new participant-joined.
+    // Joining a round you are already in is IDEMPOTENT (2026-09-03 ticket): it hands back the
+    // seat you already hold. This used to be a 409 — and the join code is the ONE thing every
+    // golfer in a group has, which makes it the universal way back into a round when "Your
+    // rounds" cannot show one. Refusing it turned the only door a stranded golfer had into a
+    // dead end that told them, by uuid, that they could not go where they already were.
+    //
+    // The guard this replaces was aimed at the fold's last-write-wins on golferId silently
+    // REWRITING the caller's seat. Honored exactly, and more strictly: this path appends
+    // nothing. No participant-joined means no fold to win — the tee, the strokes and the seat
+    // are untouched as a matter of structure rather than of care.
+    //
+    // `command.tee` is deliberately ignored here, and deliberately NOT validated (the
+    // findTeeSet call moved below this branch for exactly that reason): the seat already has a
+    // tee, this call cannot change it, so rejecting a stale or odd tee would fail a golfer's
+    // way back in over a field this path does not read. Changing your tee is a different act
+    // than getting back in, and it does not happen at this door.
+    //
+    // A DEPARTED golfer falls through — rejoining after leaving is just joining again (spec §4),
+    // a real seat the fold must record, and their `departed` flag is cleared by that append.
     if (seated && seated.departed !== true) {
-      throw new ApplicationError("golfer-already-in-round", `golfer ${golfer} is already a participant in this round`);
+      // The pointer is repaired on the way through, on the same proof the seat itself rests on:
+      // `seated` came from the round's own fold. So the code that gets a golfer back INTO the
+      // round also puts it back in their list — one act, from the golfer's side.
+      await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, golfer, id, state.card.courseName);
+      return { roundId: id, token: deps.tokens.issue({ scope: "participant", roundId: id, golferId: golfer }), golferId: golfer, joinCode: command.code };
     }
+
+    findTeeSet(state.card, command.tee); // unknown-tee-set (DomainError) propagates
 
     // A first join starts at 0 strokes (spec 2026-07-30 §2: joining asks no question about your
     // game); a REJOIN carries the seat's current number forward. That is not a nicety — the fold

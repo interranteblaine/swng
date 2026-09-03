@@ -187,7 +187,7 @@ const setup = async (verifier: AccountVerifier = subVerifier, logger: Logger = c
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots }),
-    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store }),
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store, projectionStore, logger, clock }),
     createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
     supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
     getCourse: getCourse({ cardStore }),

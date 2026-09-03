@@ -36,15 +36,25 @@ export interface ProjectionStore {
   putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number }): Promise<void>;
   listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number })[]>;
 
-  // Presence (spec §5). Implemented here — ahead of any real writer — so the store's shape
-  // rewrites exactly once rather than growing a second time when realignment Task 13 (the
-  // StartRound/JoinRound writers + "Your rounds" home read, AND the finalize-time deleteLive
-  // call via projectArchive's per-participant loop) lands. `expiresAtSec` is epoch
-  // SECONDS — DynamoDB TTL's own unit, unlike every other timestamp in this codebase
-  // (milliseconds) — and the adapter writes it into the item's `ttl` attribute, the one the
-  // projections table's TTL spec already names (apps/infra-cdk/lib/swngStack.ts, realignment
-  // Task 1).
-  putLive(golferId: GolferId, entry: { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number }): Promise<void>;
+  // Presence (spec §5): the pointer that is a golfer's route back into a live round they are
+  // seated in — written at seat time (rounds/presence.ts) and re-asserted on every proven
+  // re-entry (rounds/mintParticipantToken.ts).
+  //
+  // A presence pointer HAS NO EXPIRY, and the entry deliberately carries no way to give it one
+  // (2026-09-03 ticket). It is removed by exactly two events, both of which mean the round is
+  // over: finalize (projections/projectArchive.ts) and abandon (rounds/abandonRound.ts). The
+  // former `expiresAtSec` — a 36h DynamoDB TTL anchored to SEAT time — made a round's
+  // discoverability expire independently of the round, so a round created for a tee time more
+  // than 36h out deleted its own creator's way back in before the golf ever happened. A
+  // user-visible rule must not be implemented as a TTL: wrong anchor, and DynamoDB's sweep is
+  // best-effort ("typically within 48 hours"), so the window was never really 36h either.
+  //
+  // What this costs, accepted deliberately: a live round that is never finalized and never
+  // abandoned keeps its pointers forever, and stays in its participants' "Your rounds". That
+  // row is TRUE — the round really is still live — and the product already has the close-out
+  // act for it (POST /rounds/{roundId}/abandon). A visible stale row a golfer can close beats
+  // an invisible live one they cannot recover.
+  putLive(golferId: GolferId, entry: { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number }): Promise<void>;
   deleteLive(golferId: GolferId, roundId: RoundId): Promise<void>;
   listLive(golferId: GolferId): Promise<readonly { roundId: RoundId; courseName: string; joinedAtMs: number }[]>;
 

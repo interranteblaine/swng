@@ -48,6 +48,30 @@ const template = Template.fromStack(
 
 // Resolves a resource's logical id (never hardcode one of CDK's own hashed ids) — the same idiom
 // swngStack.test.ts uses.
+// Index a synthesized resource BY LOGICAL ID and narrow in one step. `findResources` returns a
+// plain record, so every `[id]` lookup is `possibly undefined` to tsc — and the sites that used
+// to index directly either carried that type into a property access or reached for `!`, which
+// ASSERTS the very presence this file exists to VERIFY. Throwing here names the id, so a resource
+// that genuinely disappears from the template fails as "no AWS::DynamoDB::Table with logical id X"
+// rather than as a downstream "Cannot read properties of undefined" pointing at the wrong line.
+// `Properties` is named because every caller reads it; the index signature carries the
+// template's other top-level keys (`DeletionPolicy`, `UpdateReplacePolicy`) as `unknown`, so a
+// caller states the shape it expects at the point it reads one, rather than this helper
+// pretending to know every resource's schema.
+type SynthesizedResource = { readonly Properties: Record<string, unknown>; readonly [key: string]: unknown };
+
+const resourceById = (resourceType: string, logicalId: string): SynthesizedResource => {
+  const resource: unknown = template.findResources(resourceType)[logicalId];
+  if (resource === undefined) throw new Error(`no ${resourceType} with logical id ${logicalId} in the template`);
+  // Checked, not asserted: `findResources` is typed `{ [key: string]: any }`, so claiming the
+  // shape without looking would be the cast this repo rules out. Both failures name what is
+  // missing, which is the whole value of reading the template by id in the first place.
+  if (typeof resource !== "object" || resource === null || !("Properties" in resource)) {
+    throw new Error(`${resourceType} ${logicalId} has no Properties block`);
+  }
+  return resource as SynthesizedResource;
+};
+
 const findLogicalId = (resourceType: string, predicate: (properties: Record<string, unknown>) => boolean): string => {
   const entry = Object.entries(template.findResources(resourceType)).find(([, resource]) => predicate(resource.Properties));
   expect(entry, `no ${resourceType} resource found matching the predicate`).toBeDefined();
@@ -98,7 +122,7 @@ const functionIdForRouteKey = (routeKey: string): string => {
   const integrationRef = target["Fn::Join"][1].find((part): part is { Ref: string } => typeof part === "object" && part !== null && "Ref" in part);
   expect(integrationRef, `route ${routeKey} does not target an integration by Ref`).toBeDefined();
 
-  const integration = template.findResources("AWS::ApiGatewayV2::Integration")[integrationRef!.Ref];
+  const integration = resourceById("AWS::ApiGatewayV2::Integration", integrationRef!.Ref);
   expect(integration, `route ${routeKey} targets an integration that is not in the template`).toBeDefined();
 
   // Recurse for the function ARN rather than matching a fixed shape. `IntegrationUri` has two
@@ -307,7 +331,7 @@ describe("who is wired to whom (the relationships a property assertion cannot se
     // request-header name precisely to exclude it. Deleting the CORS block entirely, or trimming
     // it back to ["*"], deploys clean and breaks every browser-hosted client on every
     // authenticated call.
-    const cors = template.findResources("AWS::ApiGatewayV2::Api")[apiId].Properties.CorsConfiguration as { AllowHeaders?: string[] } | undefined;
+    const cors = resourceById("AWS::ApiGatewayV2::Api", apiId).Properties.CorsConfiguration as { AllowHeaders?: string[] } | undefined;
     expect(cors, "the MCP API has no CORS configuration").toBeDefined();
     expect(cors!.AllowHeaders).toContain("authorization");
     expect(cors!.AllowHeaders).toContain("*");
@@ -333,7 +357,7 @@ describe("what the first fix round's own falsification set did not test", () => 
 
   it("CORS is asserted in FULL — every field, because each one alone breaks a browser client", () => {
     const apiId = findLogicalId("AWS::ApiGatewayV2::Api", (p) => p.Name === "swng-mcp-beta");
-    const cors = template.findResources("AWS::ApiGatewayV2::Api")[apiId].Properties.CorsConfiguration as {
+    const cors = resourceById("AWS::ApiGatewayV2::Api", apiId).Properties.CorsConfiguration as {
       AllowOrigins?: string[];
       AllowMethods?: string[];
       AllowHeaders?: string[];
@@ -419,7 +443,7 @@ describe("what the first fix round's own falsification set did not test", () => 
     for (const prefix of [/^McpFunctionServiceRole/, /^McpAuthFunctionServiceRole/]) {
       const roleId = Object.keys(template.findResources("AWS::IAM::Role")).find((id) => prefix.test(id));
       expect(roleId, `no AWS::IAM::Role matching ${prefix}`).toBeDefined();
-      const arns = template.findResources("AWS::IAM::Role")[roleId!].Properties.ManagedPolicyArns as unknown[];
+      const arns = resourceById("AWS::IAM::Role", roleId!).Properties.ManagedPolicyArns as unknown[];
       expect(arns, `${roleId} carries more than basic execution`).toHaveLength(1);
       expect(JSON.stringify(arns)).toContain("AWSLambdaBasicExecutionRole");
     }
@@ -481,7 +505,7 @@ describe("what the first fix round's own falsification set did not test", () => 
     // Review row #12. Low consequence and still true: beta is wiped deliberately and often, and
     // RETAIN leaves an orphan table holding real authorization codes behind.
     const tableId = findLogicalId("AWS::DynamoDB::Table", (p) => p.TableName === "swng-mcp-oauth-beta");
-    expect(template.findResources("AWS::DynamoDB::Table")[tableId].DeletionPolicy).toBe("Delete");
+    expect(resourceById("AWS::DynamoDB::Table", tableId).DeletionPolicy).toBe("Delete");
   });
 
   it("the throttle carries the stack's own numbers, not merely some number", () => {
@@ -502,7 +526,7 @@ describe("what the first fix round's own falsification set did not test", () => 
     // invisibly. Refresh is the only flow this client should offer; the authorization-code flow is
     // governed by AllowedOAuthFlows, not by this list.
     const clientId = findLogicalId("AWS::Cognito::UserPoolClient", (p) => String(p.ClientName ?? "").includes("mcp"));
-    expect(template.findResources("AWS::Cognito::UserPoolClient")[clientId].Properties.ExplicitAuthFlows).toEqual(["ALLOW_REFRESH_TOKEN_AUTH"]);
+    expect(resourceById("AWS::Cognito::UserPoolClient", clientId).Properties.ExplicitAuthFlows).toEqual(["ALLOW_REFRESH_TOKEN_AUTH"]);
   });
 });
 

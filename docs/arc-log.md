@@ -14,6 +14,47 @@ the spec holds the reasoning, the plan holds the tasks, git holds the diff, and 
 
 ---
 
+## 2026-09
+
+### 2026-09-03 — A seated golfer always has a way back into a live round
+`0f53f03` · no spec/plan — a ticket fix, investigated with `systematic-debugging` and scoped with `brainstorming`
+
+**The first user-reported ticket.** A golfer created a round three days ahead of the tee time and
+lost it before he ever played it — not listed under his rounds, and the join code refused him. The
+round was fine: live, his seat in the log, other players in it. What vanished was the pointer that
+let him *find* it.
+
+Presence rows carried a 36h DynamoDB TTL anchored to **seat time**. That constant was written when
+a round was always "starting now"; `playedAtMs` (2026-08-01) let a round be dated away from now and
+nothing re-anchored the TTL, so a round booked further out than 36h deleted its own creator's route
+back in before the golf happened. The deeper error is the mechanism: **a user-visible rule must not
+be implemented as a TTL** — wrong anchor, and DynamoDB's sweep is best-effort ("typically within 48
+hours"), so the window was never really 36h either.
+
+Fixing that alone would have been whack-a-mole. The class is *"a golfer is seated in a live round
+and has no route back into it"*, and it had four members — three indistinguishable to the user:
+
+| | was | now |
+|---|---|---|
+| the TTL deleted the pointer | swept 36h after seat time | **presence never expires**; only finalize/abandon remove it |
+| `writePresence` swallowed a `putLive` throw | never retried, ever | `mintParticipantToken` re-asserts it from the round's own fold |
+| a failed read rendered "No rounds yet" | a claim about an answer never given | says the read failed |
+| the join code 409'd a seated golfer | the group's one shared key, refused | **joining a round you are in is idempotent** |
+
+The last two compose into the general property — *get in once, by any means, and the pointer is
+rebuilt from truth* — which is what makes this a class fix rather than four patches.
+
+The idempotent re-join **appends nothing**, so the guard it replaced (the fold's last-write-wins
+silently rewriting the caller's seat) is honored more strictly than before: there is no second
+`participant-joined` to win a fold. The typed tee is ignored and deliberately not validated — it
+cannot change the seat, so rejecting it would fail a golfer's way back in over a field the path
+never reads. `golfer-already-in-round` is now unreachable and deleted.
+
+**The cost, taken deliberately:** a live round nobody finalizes or abandons keeps its pointers and
+stays listed forever. That row is *true* — the round really is still live — and the product already
+has the close-out act for it (`POST /rounds/{roundId}/abandon`). A visible stale round a golfer can
+close beats an invisible live one they cannot recover.
+
 ## 2026-08
 
 ### 2026-08-02 — A round plays a nine

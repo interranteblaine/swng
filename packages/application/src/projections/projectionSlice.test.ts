@@ -265,10 +265,10 @@ describe("projectArchive", () => {
   it("deletes the LIVE pointer for every participant on the archive", async () => {
     const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo }]);
-    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
-    await ctx.projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500 });
+    await ctx.projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600 });
     // A DIFFERENT round's presence for ann must survive untouched.
-    await ctx.projectionStore.putLive(ann, { roundId: roundId("other-round"), courseName: "Pebble Municipal", joinedAtMs: 100, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("other-round"), courseName: "Pebble Municipal", joinedAtMs: 100 });
     const project = projectArchive(ctx);
 
     await project(archive);
@@ -283,7 +283,7 @@ describe("projectArchive", () => {
   it("re-projecting the same archive a second time is a no-op for presence, not an error", async () => {
     const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
-    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500 });
     const project = projectArchive(ctx);
 
     await project(archive);
@@ -306,7 +306,7 @@ describe("projectArchive", () => {
     const golferStore = await accountsFor(ann);
     await golferStore.put({ id: bo, name: "Bo Ghost" }, undefined); // sub-less row
     // Pre-existing presence for the ghost — presence-cleanup clears it regardless of account status.
-    await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
+    await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600 });
 
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo, perHole: 5 }]);
     const project = projectArchive({ projectionStore, golferStore, logger });
@@ -339,7 +339,7 @@ describe("projectArchive", () => {
   it("clears presence for the account golfer it projected", async () => {
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await accountsFor(ann);
-    await projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    await projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500 });
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
     const project = projectArchive({ projectionStore, golferStore, logger: createNullLogger() });
 
@@ -373,8 +373,8 @@ describe("projectArchive", () => {
     // participant with zero scored holes and zero game membership.
     expect(archive.participants.some((p) => p.golferId === bo)).toBe(false);
 
-    await ctx.projectionStore.putLive(bo, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
-    await ctx.projectionStore.putLive(ann, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(bo, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500 });
+    await ctx.projectionStore.putLive(ann, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500 });
     const project = projectArchive(ctx);
 
     await project(archive);

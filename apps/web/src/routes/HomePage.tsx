@@ -40,15 +40,27 @@ export function HomePage() {
   // undefined = not loaded yet (or signed out / no golfer) — the section renders its own
   // loading/empty copy only once this has a real array.
   const [liveRounds, setLiveRounds] = useState<GetMyLiveRoundsResponse["rounds"] | undefined>(undefined);
+  // A failed read is NOT an empty list (2026-09-03 ticket). This used to `.catch(() => {})`, which
+  // left `liveRounds` undefined and rendered "No rounds yet" — a claim about an answer the server
+  // never gave. To a golfer whose round is live that reads exactly like the round disappearing,
+  // which is the ticket this arc exists to answer; getting there via a dropped fetch instead of a
+  // deleted pointer makes it no less wrong. The two states are distinguishable, so they must read
+  // differently.
+  const [liveRoundsFailed, setLiveRoundsFailed] = useState(false);
 
   useEffect(() => {
     if (!hasGolferIdentity) {
       setLiveRounds(undefined);
+      setLiveRoundsFailed(false);
       return;
     }
+    setLiveRoundsFailed(false);
     void withAuth((token) => getMyLiveRounds(token))
-      .then((response) => setLiveRounds(response.rounds))
-      .catch(() => {}); // degrade silently — a transient failure just leaves the list empty
+      .then((response) => {
+        setLiveRounds(response.rounds);
+        setLiveRoundsFailed(false);
+      })
+      .catch(() => setLiveRoundsFailed(true));
   }, [hasGolferIdentity, withAuth]);
 
   // Navigation Task 5 (spec §4b): home becomes the switchboard — "Recent rounds" is the latest 3
@@ -200,7 +212,14 @@ export function HomePage() {
                 )}
               </div>
             )}
-            {!liveRounds || liveRounds.length === 0 ? (
+            {liveRoundsFailed ? (
+              // Says what is true — the read failed — and deliberately does NOT claim the list is
+              // empty. The join code still works from here (it is an idempotent way back into any
+              // round you are seated in), so the door out of this state is already on the page.
+              <p role="status" aria-label="Your rounds could not be loaded" className="text-fairway">
+                Your rounds could not be loaded. Check your connection, or use the code from your group to rejoin.
+              </p>
+            ) : !liveRounds || liveRounds.length === 0 ? (
               <p className="text-fairway">No rounds yet</p>
             ) : (
               <ul className="flex flex-col gap-2">

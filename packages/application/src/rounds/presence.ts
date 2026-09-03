@@ -3,13 +3,6 @@ import type { Clock } from "../ports/clock.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 
-// TTL backstop (spec §5, ports/projectionStore.ts's own doc comment): 36 hours comfortably
-// outlives any real round (even an 18-hole round with a long lunch break) but still reclaims
-// a pointer a round that never gets finalized (abandoned mid-setup, a device lost) would
-// otherwise leave live forever. The PRIMARY removal path is projections/projectArchive.ts's
-// own deleteLive loop at finalize time — this is only what fires if that never happens.
-const PRESENCE_TTL_SECONDS = 36 * 3_600;
-
 // Presence (projection-realignment spec §5, Task 13): one LIVE#<roundId> pointer under the
 // seated golfer's OWN identity partition — written at seat-time by both seat paths (startRound
 // for the creator, joinRound for the as-self joiner), so "your rounds" (the signed-in home
@@ -27,16 +20,10 @@ export const writePresence = async (
   courseName: string,
 ): Promise<void> => {
   try {
-    // One clock read shared between joinedAtMs and expiresAtSec — not two separate `now()`
-    // calls — so the two never drift relative to each other under a test clock that advances
-    // per call (testing/fakes.ts's createFixedClock).
-    const nowMs = deps.clock.now();
-    await deps.projectionStore.putLive(golferId, {
-      roundId,
-      courseName,
-      joinedAtMs: nowMs,
-      expiresAtSec: Math.floor(nowMs / 1_000) + PRESENCE_TTL_SECONDS,
-    });
+    // No expiry, by construction (ports/projectionStore.ts): the pointer is removed when the
+    // ROUND ends — finalize or abandon — and by nothing else. `joinedAtMs` is a display/sort
+    // fact only; nothing reads it as a deadline.
+    await deps.projectionStore.putLive(golferId, { roundId, courseName, joinedAtMs: deps.clock.now() });
   } catch (error) {
     deps.logger.warn("presence-write-failed", {
       golferId,

@@ -17,7 +17,7 @@ import { queryAllPages } from "./paginate.js";
 // that is a close-out backfill fact (one `rebuildProjections` run replaces every stored line),
 // not something this adapter's read path should paper over with a fallback.
 type Line = GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number };
-type LiveEntry = { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number };
+type LiveEntry = { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number };
 
 export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentClient; tableName: string }): ProjectionStore => {
   const { client, tableName } = config;
@@ -57,15 +57,19 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
         (item) => item.line as Line,
       ),
 
-    // Presence (spec §5) — a register, not a projection: no rebuild path, none needed. `ttl` is
-    // the item's OWN top-level attribute (DynamoDB TTL requires a top-level Number), set to
-    // `expiresAtSec` — the projections table's TTL spec names this exact attribute (Task 1).
+    // Presence (spec §5) — a register, not a projection: no rebuild path, none needed.
+    //
+    // NO `ttl` attribute is written (2026-09-03 ticket, ports/projectionStore.ts): the
+    // projections table has TTL enabled for other item kinds, and DynamoDB's sweep deletes only
+    // items that CARRY the attribute — so omitting it is what makes a presence pointer outlive
+    // everything except the round's own end. Adding `ttl` back here silently deletes live
+    // golfers' only route back into their round; the contract test pins its absence.
     putLive: async (golferId: GolferId, entry: LiveEntry) => {
-      const { roundId, courseName, joinedAtMs, expiresAtSec } = entry;
+      const { roundId, courseName, joinedAtMs } = entry;
       await client.send(
         new PutCommand({
           TableName: tableName,
-          Item: { pk: golferPk(golferId), sk: liveSk(roundId), live: { roundId, courseName, joinedAtMs }, ttl: expiresAtSec },
+          Item: { pk: golferPk(golferId), sk: liveSk(roundId), live: { roundId, courseName, joinedAtMs } },
         }),
       );
     },

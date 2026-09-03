@@ -606,10 +606,58 @@ describe("JoinRound — as-self only", () => {
     expect(boJoinedEvent).toMatchObject({ kind: "participant-joined", participant: { golferId: joined.golferId, name: placeholderName("sub-placeholder") } });
   });
 
-  it("rejects a re-tap from a golfer who is ALREADY a currently-seated participant — golfer-already-in-round", async () => {
-    const round = await freshLiveRound(); // Ann (creator) + Bo already seated
-    await expect(round.join({ code: round.host.joinCode, tee: "white" }, { sub: BO.sub })).rejects.toMatchObject({
-      code: "golfer-already-in-round",
+  // Joining a round you are already in is IDEMPOTENT, not an error (2026-09-03 ticket). The join
+  // code is the one thing every golfer in a group has, so it is the universal route back into a
+  // round when "Your rounds" cannot show one — whatever left the presence pointer missing. This
+  // used to answer a 409 whose message ("golfer <uuid> is already a participant in this round")
+  // was a golfer being told they cannot go where they already are, from the only door they had.
+  //
+  // The guard this replaces was aimed at the fold's last-write-wins on golferId SILENTLY
+  // REWRITING the caller's own seat. That concern is honored exactly, and more strictly than
+  // before: this path appends NOTHING. There is no second participant-joined to win a fold, so
+  // the tee, the strokes and the seat's identity are all provably untouched — which the
+  // assertions below pin as facts, not as an absence of error.
+  describe("a still-seated golfer re-taps join (the way back in)", () => {
+    it("returns a WORKING token for the seat they already hold, appending no event", async () => {
+      const round = await freshLiveRound(); // Ann (creator) + Bo already seated
+      const before = await round.events(round.host.roundId, 0);
+
+      const rejoined = await round.join({ code: round.host.joinCode, tee: "white" }, { sub: BO.sub });
+
+      expect(rejoined.roundId).toBe(round.host.roundId);
+      expect(rejoined.golferId).toBe(round.bo.golferId);
+      expect(rejoined.joinCode).toBe(round.host.joinCode);
+      expect(round.tokens.verify(rejoined.token)).toEqual({ scope: "participant", roundId: round.host.roundId, golferId: round.bo.golferId });
+      // The log is byte-identical — nothing was appended, so nothing could have been rewritten.
+      expect((await round.events(round.host.roundId, 0)).events).toEqual(before.events);
+    });
+
+    // The seat's own facts, pinned directly rather than inferred from "no error was thrown":
+    // a re-tap carrying a DIFFERENT tee must not move the golfer's tee, and must not reset the
+    // strokes the group typed onto the roster.
+    it("leaves the seat's tee and strokes exactly as they were, even when the re-tap names another tee", async () => {
+      const round = await freshLiveRound();
+      const boClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.bo.golferId };
+      await round.setStrokes(boClaims, { golferId: round.bo.golferId, strokes: 9 });
+
+      await round.join({ code: round.host.joinCode, tee: "blue" }, { sub: BO.sub });
+
+      const seat = reduceRound((await round.events(round.host.roundId, 0)).events).participants.find((p) => p.golferId === round.bo.golferId);
+      expect(seat).toMatchObject({ tee: "white", strokes: 9, golferId: round.bo.golferId });
+    });
+
+    // The whole point of the change: this is a REPAIR path. A golfer whose pointer vanished
+    // types the group's code and is both back in the round and back in "Your rounds".
+    it("rebuilds a missing presence pointer, so the round returns to their list", async () => {
+      const round = await freshLiveRound();
+      await round.projectionStore.deleteLive(round.bo.golferId, round.host.roundId);
+      expect(await round.projectionStore.listLive(round.bo.golferId)).toEqual([]);
+
+      await round.join({ code: round.host.joinCode, tee: "white" }, { sub: BO.sub });
+
+      expect(await round.projectionStore.listLive(round.bo.golferId)).toEqual([
+        { roundId: round.host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) },
+      ]);
     });
   });
 

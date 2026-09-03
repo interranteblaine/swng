@@ -345,7 +345,7 @@ export const createInMemoryCrewStore = (): CrewStore => {
 // stored by anything this fake needs to model.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
   const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number; playedAtMs: number; createdAtMs?: number }>>();
-  const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
+  const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number }>>();
 
   return {
     putLine: async (golferId, line) => {
@@ -355,7 +355,7 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
     },
     listLines: async (golferId) => [...(linesByGolfer.get(golferId)?.values() ?? [])],
     putLive: async (golferId, entry) => {
-      const live = liveByGolfer.get(golferId) ?? new Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>();
+      const live = liveByGolfer.get(golferId) ?? new Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number }>();
       live.set(entry.roundId, entry); // upsert by roundId
       liveByGolfer.set(golferId, live);
     },

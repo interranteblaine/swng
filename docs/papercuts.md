@@ -396,3 +396,22 @@ every sign-in is exactly the "thoughtful and intentional" bar this codebase hold
 handler should exchange the code exactly once (guard the effect against a double-run / re-render
 so the consumed code is never re-POSTed). Deferred — auth-flow scope, not this arc; recorded so
 it is not lost.
+
+### 19. The projections table still has TTL enabled with no writer
+
+Found while fixing the 2026-09-03 presence ticket. `swngStack.ts`'s projections table declares
+`timeToLiveAttribute: "ttl"`, and after that fix **nothing writes a `ttl` attribute to it at all**
+— presence rows were the only writer, and history lines never set one. The config is inert today
+(DynamoDB's sweep only touches items that carry the attribute), so this is not a live defect.
+
+**Severity: low, but it is a loaded gun.** A future writer that puts a `ttl` on any item in this
+table gets silent, best-effort, unrecoverable deletion of a golfer's own record — the exact shape
+of the ticket that produced it, which cost a real user his round and needed a hand-written repair
+script to undo. The contract test (`projectionStore.contract.test.ts`) pins the absence of `ttl`
+on presence rows specifically, so a regression *there* fails loudly; nothing guards the table as a
+whole.
+
+**Recommendation:** remove `timeToLiveAttribute` from the projections table. Deliberately not done
+in the ticket fix — that was a prod hotfix under time pressure and this is a table-level infra
+change deserving its own diff and its own deploy, not a rider on an urgent one. Deferred, not
+forgotten.

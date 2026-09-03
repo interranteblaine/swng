@@ -27,11 +27,6 @@ export type ApplicationErrorCode =
   // winner's golfer) — the code still surfaces to the client only for a genuine bind conflict.
   | "golfer-already-claimed"
   // accounts-only identity: JoinRound rejects a re-tap from a golfer who is ALREADY a
-  // currently-seated participant of THIS round — a clean 409 (UX), not a data-integrity
-  // backstop (the domain fold keys participants by golferId with last-write-wins, so a
-  // duplicate append collapses harmlessly). A departed golfer is exempt (rejoining is just
-  // joining again, spec §4).
-  | "golfer-already-in-round"
   // M8: CrewStore is a plain CRUD store too (courses'/golfers' "conflict" precedent above) —
   // a failed expectedRevision condition on a crew put.
   | "crew-conflict"

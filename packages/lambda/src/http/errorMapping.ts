@@ -33,9 +33,6 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "unknown-game": 404,
   "golfer-conflict": 409,
   "golfer-already-claimed": 409,
-  // accounts-only identity: joinRound rejects a re-tap from a golfer already seated in THIS round
-  // — a failed precondition on the roster, the same shape as golfer-conflict — 409.
-  "golfer-already-in-round": 409,
   // M8 Task 2 (application/src/errors.ts) forward-provisions these ahead of M8 Task 4's
   // actual crew routes — same "the map is exhaustive by construction, so a code lands here
   // the instant the union grows" precedent as course-not-found above.
@@ -143,7 +140,7 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "round-abandoned": 409,
   // M8 Task 2 (domain/src/crew/crew.ts's addMember): the golferId named in the request is
   // already on the roster — a failed precondition on the roster, same bucket as
-  // crew-conflict/golfer-already-in-round above, not a genuine-bug 500.
+  // crew-conflict above, not a genuine-bug 500.
   "duplicate-member": 409,
   // M8 close-out fix #1: addMember's sibling throw — the wire's `min(1)` doesn't trim, so a
   // whitespace-only name reaches this. A bad-body precondition, same shape as

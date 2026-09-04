@@ -415,3 +415,23 @@ whole.
 in the ticket fix — that was a prod hotfix under time pressure and this is a table-level infra
 change deserving its own diff and its own deploy, not a rider on an urgent one. Deferred, not
 forgotten.
+
+### 20. A mid-round joiner pins the current-hole pointer to hole 1
+
+Found while fixing the 2026-09-04 ticket. `currentHoleNumber` (`apps/web/src/round/ScorecardGrid.tsx`)
+returns the first hole where a golfer still in the round has no cell, and drives the gold
+"where are we" highlight. That ticket's cause — a **departed** golfer's blank cells — is fixed.
+The other cause is not: `joinRound` refuses only a `final` round, so a golfer can join at the 3rd
+tee, and they will never have a cell for holes 1–2. The pointer then sits on hole 1 for the rest of
+the round, on every phone, exactly as the reported bug did.
+
+**Severity: low, but it is the reported bug with a different cause.** It needs someone to join a
+round already in progress, which is a real thing groups do (a fourth arriving late) and not
+something the app discourages.
+
+**Recommendation:** the honest rule is "ignore a golfer's holes before their first cell" — a
+different predicate from `!departed`, with its own edges (a golfer who joins late and has scored
+nothing at all has no first cell to anchor on, so they must either hold the pointer at their join
+point or not hold it at all — a product call). Deliberately not folded into the departed fix: that
+was a live-round hotfix under a tee time, and this deserves the predicate thought through rather
+than guessed at.

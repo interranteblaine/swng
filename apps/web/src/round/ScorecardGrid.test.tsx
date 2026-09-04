@@ -463,6 +463,63 @@ describe("ScorecardGrid — current hole", () => {
     expect(row2.getAttribute("aria-current")).toBe("true");
   });
 
+  // A golfer who LEFT will never score again, so the pointer must not wait on them (2026-09-04
+  // ticket). The reported round had a golfer join, leave without scoring, and pin the highlight to
+  // hole 1 for the whole round on every phone — the marker that tells the group which hole to
+  // score, stuck on a hole they finished, because of someone who is not there.
+  it("does not wait on a departed golfer's empty cells — the pointer follows the players still there", () => {
+    const state = twoPlayerState({
+      participants: [participant(ANN, "Ann", "white", 8), { ...participant(BO, "Bo", "white", 4), departed: true }],
+      cells: {
+        // Ann has played 1-2 and nobody has scored for Bo, who left. Hole 3 is where Ann is.
+        [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
+        [cellKey(ANN, 2)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
+      },
+    });
+    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
+
+    expect(screen.getByRole("row", { name: /^Hole 1/ }).getAttribute("aria-current")).not.toBe("true");
+    expect(screen.getByRole("row", { name: /^Hole 3/ }).getAttribute("aria-current")).toBe("true");
+  });
+
+  // The other half of the same predicate, stated directly: a PRESENT golfer with no cells still
+  // holds the pointer. The over-filtering mutations (filter everyone, filter the wrong flag) are
+  // already caught by "highlights the first hole where not every participant has a cell" above —
+  // this is deliberate redundancy on the one case the whole feature exists for, not new coverage.
+  it("still waits on a PRESENT golfer's empty cells", () => {
+    const state = twoPlayerState({
+      cells: {
+        [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
+        [cellKey(ANN, 2)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
+        // Bo is present and has scored nothing — hole 1 is still current.
+      },
+    });
+    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
+
+    expect(screen.getByRole("row", { name: /^Hole 1/ }).getAttribute("aria-current")).toBe("true");
+  });
+
+  // The line this change must NOT cross. A departed golfer keeps their COLUMN, their cells and
+  // their dots — that column is the only surface that can mark their remaining holes picked-up,
+  // which is how a game resolves around an absence (accounts-only identity spec §4), and the only
+  // way to correct a hole they did play. Hiding it was designed, reviewed and rejected; this test
+  // is what fails if anyone reaches for it again.
+  it("keeps a departed golfer's column, cells and dots — only the pointer ignores them", () => {
+    const state = twoPlayerState({
+      participants: [participant(ANN, "Ann", "white", 8), { ...participant(BO, "Bo", "white", 4), departed: true }],
+      cells: { [cellKey(BO, 1)]: scoreCell({ kind: "strokes", strokes: 5 }, BO) },
+    });
+    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
+
+    expect(screen.getByRole("columnheader", { name: /Bo/ })).toBeTruthy();
+    expect(cellButton("Bo", 1)).toBeTruthy();
+    // Bo's 4 strokes land on SI 1-4 — holes 2, 7, 4, 8 on fixtureLinks — so hole 7 carries a dot.
+    // Asserted, not implied: the point is that a departed seat is still ALLOCATED against, which a
+    // column-presence check alone would not catch.
+    expect(cellButton("Bo", 7).textContent).toContain("●");
+    expect(cellButton("Bo", 7).hasAttribute("disabled")).toBe(false); // and still tappable
+  });
+
   // Regression: a cleared cell is RETAINED in state.cells (the fold invariant) — a mis-tap
   // undone on the current hole must bring the highlight BACK to that hole, not leave it
   // pointing past a hole that now needs re-entry. currentHoleNumber must read through cellAt

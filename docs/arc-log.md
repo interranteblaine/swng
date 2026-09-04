@@ -16,6 +16,33 @@ the spec holds the reasoning, the plan holds the tasks, git holds the diff, and 
 
 ## 2026-09
 
+### 2026-09-04 — The card stops waiting on a golfer who left
+Ticket fix, no spec/plan · reviewed by three independent passes before a line was written
+
+Second user-reported ticket, found while troubleshooting the first. A golfer joined a live round,
+left, and the round kept waiting on them: `currentHoleNumber` returns the first hole where **any**
+participant lacks a cell, so a departed golfer with no scores pinned the gold "where are we"
+highlight to hole 1 for the rest of the round, on every phone. The pointer that tells a group which
+hole to score, stuck on a hole they finished, because of someone who is not there.
+
+One predicate, in one UI-local function: the pointer asks *who are we still waiting on*, and a
+golfer who left will never score again.
+
+**What was designed and rejected matters more than what shipped.** The obvious reading — "hide a
+departed golfer from the card" — was written up, reviewed, and abandoned. That column is the ONLY
+surface that can mark a departed golfer's remaining holes picked-up, which is how a game resolves
+around an absence (accounts-only identity §4), and the only way to correct a hole they did play;
+hiding it would have deleted the unblock path for the very problem it was aimed at. It also
+reversed a spec-pinned decision (`2026-07-13-accounts-only-identity.md:91`, the roster's "left"
+marker), needed new golf compute routed past a lint fence that would not have caught a direct
+import, and introduced several ways to make a column appear and vanish mid-round. A second rejected
+idea — refusing to add a departed golfer to a game — contradicts §4, `allocation.ts` and
+`setStrokes.ts`, all three of which say a departed player still counts in every game.
+
+So: a departed golfer keeps their column, their cells, their dots and their "left" badge. Only the
+pointer ignores them. The mid-round joiner hits the same symptom by a different cause and is
+recorded in `papercuts.md` (20) rather than guessed at under a tee time.
+
 ### 2026-09-03 — A seated golfer always has a way back into a live round
 `0f53f03` · no spec/plan — a ticket fix, investigated with `systematic-debugging` and scoped with `brainstorming`
 

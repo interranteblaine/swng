@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { dotsForHoles, grossForHoles, intendedHoles, netStrokes, parForHoles, roundStrokeAllocation } from "@swng/client";
 import { cellAt, findTeeSet, scoredStrokes, underPar } from "@swng/domain";
-import type { CourseCard, GolferId, HoleResult, Hole, HoleSelection, Participant, RoundState, ScoreCell } from "@swng/domain";
+import type { CourseCard, GolferId, HoleResult, Hole, HoleSelection, Participant, RosterEntry, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
 import { ScorePad } from "./ScorePad";
 
@@ -34,14 +34,33 @@ export const canonicalHoles = (card: CourseCard, selection: HoleSelection): read
   return teeSet ? intendedHoles(teeSet, selection) : [];
 };
 
-// First hole where not every participant has a cell — the on-course "where are we" pointer
-// (brief: "current hole = first hole where not every participant has a cell"). Reads through
-// cellAt, never a raw membership check on `cells` — a cleared cell is RETAINED in state.cells
-// (the fold invariant), so an `in`/key-presence test would treat a cleared cell as recorded and
-// leave the highlight past a hole that actually needs re-entry.
-const currentHoleNumber = (holes: readonly Hole[], participants: readonly Participant[], cells: RoundState["cells"]): number | undefined => {
+// First hole where a golfer STILL IN THE ROUND has no cell — the on-course "where are we"
+// pointer. The brief said "not every participant"; that was written before `participant-left`
+// existed and it is wrong now (2026-09-04 ticket): this pointer asks *who are we still waiting
+// on*, and a golfer who left will never score again, so waiting on them pins the highlight to
+// their first blank hole for the rest of the round, on every phone, over someone who is not
+// there. Departure is the ONLY thing filtered here, and only here — a departed golfer keeps
+// their column, their cells and their dots, because that column is the one surface that can mark
+// their remaining holes picked-up (how a game resolves around an absence, accounts-only identity
+// spec §4) and the only way to fix a hole they did play. Hiding it was designed and rejected.
+//
+// Reads through cellAt, never a raw membership check on `cells` — a cleared cell is RETAINED in
+// state.cells (the fold invariant), so an `in`/key-presence test would treat a cleared cell as
+// recorded and leave the highlight past a hole that actually needs re-entry.
+//
+// `RosterEntry`, not `Participant`: `departed` lives on the roster entry the fold produces.
+// Everyone departed yields no pointer at all, which is honest — nobody is scoring that round.
+//
+// Departure is one of TWO causes of the same stuck pointer, and only this one is fixed here. A
+// golfer who JOINS mid-round (joinRound refuses only a final round) has no cell on the holes
+// played before they arrived and will never get one, so they pin the pointer to hole 1 exactly
+// the same way. Not fixed with this, because the honest rule for that case — ignore a golfer's
+// holes before their first cell — is a different predicate with its own edges, and this ticket
+// was a departed golfer. Recorded in docs/papercuts.md rather than left for someone to rediscover.
+const currentHoleNumber = (holes: readonly Hole[], participants: readonly RosterEntry[], cells: RoundState["cells"]): number | undefined => {
+  const stillPlaying = participants.filter((participant) => participant.departed !== true);
   for (const hole of holes) {
-    if (participants.some((p) => cellAt(cells, p.golferId, hole.number) === undefined)) return hole.number;
+    if (stillPlaying.some((p) => cellAt(cells, p.golferId, hole.number) === undefined)) return hole.number;
   }
   return undefined;
 };
